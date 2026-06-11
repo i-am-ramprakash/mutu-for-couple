@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Music, Plus, Play, Pause, Trash2, Volume2, HelpCircle, User as UserIcon } from 'lucide-react';
+import React, { useEffect, useState, useRef } from 'react';
+import { ArrowLeft, Music, Plus, Play, Pause, Trash2, Volume2, HelpCircle, User as UserIcon, Upload } from 'lucide-react';
 import { User } from '../types';
 
 interface Track {
@@ -25,6 +25,11 @@ export default function SharedMusic({ user, onBack }: SharedMusicProps) {
   const [artist, setArtist] = useState('');
   const [url, setUrl] = useState('');
 
+  // Audio Upload
+  const [uploadingAudio, setUploadingAudio] = useState(false);
+  const [uploadedFile, setUploadedFile] = useState<{ url: string; name: string } | null>(null);
+  const audioFileInputRef = useRef<HTMLInputElement>(null);
+
   // Local audio players state
   const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
   const [audioObj, setAudioObj] = useState<HTMLAudioElement | null>(null);
@@ -41,6 +46,45 @@ export default function SharedMusic({ user, onBack }: SharedMusicProps) {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAudioFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingAudio(true);
+    try {
+      const res = await fetch('/api/audio/upload', {
+        method: 'POST',
+        headers: {
+          'x-filename': encodeURIComponent(file.name),
+        },
+        body: file,
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to upload high quality audio.');
+      }
+
+      const result = await res.json();
+      setUploadedFile({ url: result.url, name: file.name });
+      setUrl(result.url);
+      
+      const cleanName = file.name.replace(/\.[^/.]+$/, "");
+      const parts = cleanName.split('-');
+      if (parts.length > 1) {
+        setArtist(parts[0].trim());
+        setTitle(parts.slice(1).join('-').trim());
+      } else {
+        setTitle(cleanName);
+        setArtist(user.name);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Failed to process and secure your premium HD audio track upload.');
+    } finally {
+      setUploadingAudio(false);
     }
   };
 
@@ -77,6 +121,7 @@ export default function SharedMusic({ user, onBack }: SharedMusicProps) {
         setTitle('');
         setArtist('');
         setUrl('');
+        setUploadedFile(null);
         fetchTracks();
       }
     } catch (err) {
@@ -193,7 +238,7 @@ export default function SharedMusic({ user, onBack }: SharedMusicProps) {
               <div className="space-y-1">
                 <label className="text-[9.5px] font-bold text-stone-500 uppercase">Audio Stream URL (MP3 format)</label>
                 <input
-                  type="url"
+                  type="text"
                   placeholder="https://example.com/stream.mp3"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
@@ -201,9 +246,38 @@ export default function SharedMusic({ user, onBack }: SharedMusicProps) {
                 />
               </div>
 
+              <div className="pt-1 select-none">
+                <div className="relative border-2 border-dashed border-rose-200 dark:border-stone-700 hover:border-rose-450 p-4 text-center rounded-2xl bg-white dark:bg-stone-800/45 transition">
+                  <input
+                    type="file"
+                    ref={audioFileInputRef}
+                    onChange={handleAudioFileUpload}
+                    accept="audio/*"
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => audioFileInputRef.current?.click()}
+                    disabled={uploadingAudio}
+                    className="flex flex-col items-center justify-center gap-1.5 w-full cursor-pointer group"
+                  >
+                    <Upload size={20} className="text-rose-400 group-hover:scale-110 group-hover:text-rose-500 transition-all" />
+                    <span className="text-[10px] font-bold text-rose-500">
+                      {uploadingAudio ? 'Uploading premium track...' : 'Upload Audio File (HD Quality)'}
+                    </span>
+                    <span className="text-[8px] text-stone-400">Supports MP3, WAV, M4A, OGG up to 50MB</span>
+                  </button>
+                </div>
+                {uploadedFile && (
+                  <p className="text-[9px] text-emerald-500 font-semibold mt-1 truncate">
+                    ✓ Uploaded: {uploadedFile.name}
+                  </p>
+                )}
+              </div>
+
               <button
                 type="submit"
-                disabled={adding}
+                disabled={adding || uploadingAudio}
                 className="w-full py-2 bg-rose-500 hover:bg-rose-600 disabled:bg-rose-300 text-white rounded-xl text-xs font-bold transition"
               >
                 {adding ? 'Securing track...' : 'Add to Shared Room'}

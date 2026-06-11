@@ -1239,6 +1239,40 @@ app.post('/api/movies/upload', (req, res) => {
 // Mount Static directory for movie room uploads
 app.use('/uploads/movies', express.static(path.join(process.cwd(), 'data/movies')));
 
+// Mount Static directory for HD audio uploads
+app.use('/uploads/audio', express.static(path.join(process.cwd(), 'data/audio')));
+
+app.post('/api/audio/upload', (req, res) => {
+  const rawFilename = req.headers['x-filename'] as string || 'audio.mp3';
+  const filename = decodeURIComponent(rawFilename);
+  const fileExt = path.extname(filename).toLowerCase();
+  
+  if (!['.mp3', '.wav', '.m4a', '.aac', '.ogg', '.webm'].includes(fileExt)) {
+    return res.status(400).json({ error: 'Only MP3, WAV, M4A, AAC, OGG or WEBM audio formats are permitted.' });
+  }
+
+  const AUDIO_DIR = path.join(process.cwd(), 'data/audio');
+  if (!fs.existsSync(AUDIO_DIR)) {
+    fs.mkdirSync(AUDIO_DIR, { recursive: true });
+  }
+
+  const uniqueName = `aud_${Date.now()}_${Math.random().toString(36).substring(2, 7)}${fileExt}`;
+  const targetPath = path.join(AUDIO_DIR, uniqueName);
+
+  const writeStream = fs.createWriteStream(targetPath);
+  req.pipe(writeStream);
+
+  writeStream.on('finish', () => {
+    const audioUrl = `/uploads/audio/${uniqueName}`;
+    res.json({ url: audioUrl, filename: filename });
+  });
+
+  writeStream.on('error', (err) => {
+    console.error('Audio upload failed:', err);
+    res.status(500).json({ error: 'Audio upload failed' });
+  });
+});
+
 // -------------------------------------------------------------
 // PREMIUM MUTU LDR SERVICE ROADMAP ENDPOINTS
 // -------------------------------------------------------------
@@ -1684,6 +1718,14 @@ app.post('/api/couple/decorations/unlock', async (req, res) => {
   res.status(201).json(dec);
 });
 
+app.get('/api/couple/call-logs', (req, res) => {
+  const { coupleId } = req.query;
+  if (!coupleId) return res.status(400).json({ error: 'coupleId required' });
+  db.callLogs = db.callLogs || [];
+  const logs = db.callLogs.filter(c => c.coupleId === coupleId);
+  res.json(logs);
+});
+
 // GET Shared music space
 app.get('/api/couple/music', (req, res) => {
   const { coupleId } = req.query;
@@ -1754,6 +1796,33 @@ app.post('/api/couple/music/delete', async (req, res) => {
   res.json({ success: true });
 });
 
+// Dynamic AI Love Assistant Ideas Endpoint
+app.post('/api/gemini/ideas', async (req, res) => {
+  const { prompt, mood, userId } = req.body || {};
+  if (!prompt) return res.status(400).json({ error: 'Prompt is required.' });
+
+  try {
+    const ai = getGeminiAI();
+    const systemPrompt = `You are a warm, sweet, romantic AI Love Assistant for a long-distance relationship app called MuTu.
+    The user is feeling a ${mood || 'romantic'} mood today.
+    The user's query or draft request is: "${prompt}".
+
+    Please reply with highly creative, caring, and actionable romantic advice, suggestions, or drafts as requested.
+    Present your suggestions in direct, clear, beautifully formatted markdown. Keep the response compact and incredibly heartwarming.
+    Do NOT include any container ports, telemetry stats, mock console lines, or metadata. Be direct, sweet, and highly supportive!`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.5-flash',
+      contents: systemPrompt
+    });
+
+    res.json({ ideas: response.text });
+  } catch (err) {
+    console.error('AI Love Ideas generator failure:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to consult dynamic love ideas.', ideas: 'The companion had a tiny error dreaming that up. Please retry!' });
+  }
+});
+
 // Dynamic AI Love Assistant
 app.post('/api/gemini/love-assistant', async (req, res) => {
   const { category, promptText } = req.body;
@@ -1793,6 +1862,53 @@ app.post('/api/gemini/love-assistant', async (req, res) => {
 });
 
 // Relationship Health AI (insights counselor based on activity stats!)
+app.post('/api/gemini/relationship-health', async (req, res) => {
+  const { coupleId: bodyCoupleId, userId } = req.body || {};
+  let coupleId = bodyCoupleId;
+  if (!coupleId && userId) {
+    const user = db.users.find(u => u.id === userId);
+    if (user) coupleId = user.coupleId;
+  }
+  if (!coupleId) {
+    return res.status(400).json({ error: 'coupleId or userId required' });
+  }
+
+  try {
+    // 1. Gather live statistics
+    const messagesCount = db.messages.filter(m => m.coupleId === coupleId).length;
+    const memoriesCount = db.memories.filter(m => m.coupleId === coupleId).length;
+    const journalCount = db.journalEntries.filter(j => j.coupleId === coupleId).length;
+    const answerCount = db.dailyAnswers.filter(a => a.coupleId === coupleId).length;
+    const bucketCount = (db.bucketList || []).filter(b => b.coupleId === coupleId && b.completed).length;
+
+    const systemPrompt = `You are an empathetic, world-class relationship mentor specializing in supporting long-distance couples.
+    Based on the following active relationship metrics, write a supportive LDR status assessment report:
+    - Messages typed is: ${messagesCount} messages
+    - Polaroids uploaded to Memory Wall is: ${memoriesCount} memories
+    - Diaries written in Shared Journal: ${journalCount} entries
+    - Daily Questions replied: ${answerCount} answers
+    - Shared Bucket List completed: ${bucketCount} items
+
+    Please structure your reply in a cozy, beautiful markdown design containing:
+    1. **Love Connection Assessment**: A balanced, warm interpretation of these figures (e.g., highlighting great consistency in blogging or chatting, or gently noting if they haven't uploaded a memory in a while). Cite percentage estimates or funny metaphors to make the stats feel human.
+    2. **Customized LDR Action Plan**: Provide 2 physical reunion planning or online co-active ideas to enrich their connection further.
+    3. **A Heartfelt Reminder**: A supportive, encouraging signoff reminder of why distance is only a test of strength that makes connections deeper.
+
+    Do NOT include any container, port, telemetry, or backend logging lines. Keep the tone completely authentic, supportive, and human-crafted!`;
+
+    const ai = getGeminiAI();
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.5-flash',
+      contents: systemPrompt
+    });
+
+    res.json({ result: response.text, report: response.text });
+  } catch (err) {
+    console.error('Relationship Health AI failure:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to consult relationship health API.' });
+  }
+});
+
 app.get('/api/gemini/relationship-health', async (req, res) => {
   const { coupleId } = req.query;
   if (!coupleId) return res.status(400).json({ error: 'coupleId required' });
@@ -1826,7 +1942,7 @@ app.get('/api/gemini/relationship-health', async (req, res) => {
       contents: systemPrompt
     });
 
-    res.json({ result: response.text });
+    res.json({ result: response.text, report: response.text });
   } catch (err) {
     console.error('Relationship Health AI failure:', err);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to consult relationship health API.' });

@@ -93,6 +93,8 @@ export interface Message {
   status?: 'sent' | 'delivered' | 'seen' | 'failed' | 'sending';
   isVoice?: boolean;
   isMovie?: boolean;
+  replyToId?: string;
+  replyToText?: string;
 }
 
 export interface Memory {

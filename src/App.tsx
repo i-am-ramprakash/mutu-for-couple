@@ -501,6 +501,18 @@ export default function App() {
     }
   }, []);
 
+  // Auto-trigger onboarding tour guide for newly registered paired users
+  useEffect(() => {
+    if (currentUser && currentUser.partnerId) {
+      const key = `has_seen_tour_${currentUser.id}`;
+      const hasSeen = localStorage.getItem(key);
+      if (!hasSeen) {
+        setShowTour(true);
+        localStorage.setItem(key, 'true');
+      }
+    }
+  }, [currentUser]);
+
   // 2. WebSocket setup handler (re-establishes on user or couple update)
   useEffect(() => {
     if (!currentUser) {
@@ -816,7 +828,7 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = (privatePayload: { textEncrypted: string; iv: string; isVoice?: boolean; isMovie?: boolean }) => {
+  const handleSendMessage = (privatePayload: { textEncrypted: string; iv: string; isVoice?: boolean; isMovie?: boolean; replyToId?: string; replyToText?: string }) => {
     if (!currentUser) return;
     
     const newMsg: Message = {
@@ -830,6 +842,8 @@ export default function App() {
       reactions: [],
       isVoice: privatePayload.isVoice,
       isMovie: privatePayload.isMovie,
+      replyToId: privatePayload.replyToId,
+      replyToText: privatePayload.replyToText,
       status: 'sending'
     };
 
@@ -1058,10 +1072,22 @@ export default function App() {
   const initiateMediaStream = async (modeOverride?: 'voice' | 'video') => {
     const selectedMode = modeOverride || callTypeRef.current;
     try {
-      // Standard video / voice browser interface query
+      // Premium Ultra HD video + studio crystal-clear audio setup
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: selectedMode === 'video' ? { width: 360, height: 360 } : false,
-        audio: true
+        video: selectedMode === 'video' 
+          ? { 
+              width: { ideal: 1920, max: 3840 }, 
+              height: { ideal: 1080, max: 2160 },
+              frameRate: { ideal: 60, max: 60 }
+            } 
+          : false,
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 2,
+          sampleRate: 48000
+        }
       });
       setLocalStream(stream);
       localStreamRef.current = stream;
@@ -2273,9 +2299,9 @@ export default function App() {
           </div>
 
            {/* Video visual frame displays: capturing 90% of screen height */}
-          <div className="flex-1 flex items-center justify-center py-4 relative">
+          <div className="flex-1 w-full min-h-[65vh] relative py-4 flex items-center justify-center">
             {callType === 'video' ? (
-              <div className="w-full max-w-sm h-[70vh] sm:h-[75vh] md:aspect-[3/4] rounded-3xl bg-stone-950 overflow-hidden relative border border-stone-800 shadow-2xl">
+              <div className="absolute inset-0 w-full h-full rounded-3xl bg-stone-950 overflow-hidden border border-stone-800 shadow-2xl">
                 
                 {/* 100% peer-to-peer video stream element */}
                 <video

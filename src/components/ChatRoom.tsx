@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   ArrowLeft, Send, Sparkles, AlertCircle, Heart, 
   Smile, ShieldCheck, Loader2, Image as ImageIcon, Flame,
-  Mic, Square, Play, Pause, Trash2, Upload, ZoomIn, X
+  Mic, Square, Play, Pause, Trash2, Upload, ZoomIn, X, Reply
 } from 'lucide-react';
 import { User, Message, MessageReaction } from '../types';
 import { encryptMessage, decryptMessage } from '../crypto';
@@ -13,7 +13,7 @@ interface ChatRoomProps {
   user: User;
   onBack: () => void;
   messages: Message[];
-  onSendMessage: (msg: { textEncrypted: string; iv: string; isVoice?: boolean }) => void;
+  onSendMessage: (msg: { textEncrypted: string; iv: string; isVoice?: boolean; replyToId?: string; replyToText?: string }) => void;
   onSendReaction: (messageId: string, emoji: string, action: 'add' | 'remove') => void;
   typingPartner: boolean;
   onTyping: (isTyping: boolean) => void;
@@ -152,6 +152,13 @@ export default function ChatRoom({
   const typingTimeoutRef = useRef<any>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
+  // Swipe to reply & cancellation states
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [swipeTranslation, setSwipeTranslation] = useState<Record<string, number>>({});
+  const touchStartXRef = useRef<number | null>(null);
+  const activeSwipeMsgIdRef = useRef<string | null>(null);
+  const isRecordingCancelledRef = useRef(false);
+
   // Touch Portal states
   const [showThumbKissPortal, setShowThumbKissPortal] = useState(false);
   const [localThumbKissActive, setLocalThumbKissActive] = useState(false);
@@ -213,6 +220,7 @@ export default function ChatRoom({
   const audioChunksRef = useRef<Blob[]>([]);
 
   const startRecording = async () => {
+    isRecordingCancelledRef.current = false;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
@@ -225,10 +233,15 @@ export default function ChatRoom({
       };
 
       recorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         stream.getTracks().forEach(track => track.stop());
+        if (isRecordingCancelledRef.current) {
+          audioChunksRef.current = [];
+          return; // cancelled
+        }
 
-        if (audioChunksRef.current.length === 0) return; // cancelled
+        if (audioChunksRef.current.length === 0) return;
+
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
 
         const reader = new FileReader();
         reader.readAsDataURL(audioBlob);
@@ -277,6 +290,7 @@ export default function ChatRoom({
   };
 
   const cancelRecording = () => {
+    isRecordingCancelledRef.current = true;
     audioChunksRef.current = [];
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
       mediaRecorder.stop();
@@ -393,8 +407,36 @@ export default function ChatRoom({
     try {
       const text = inputText.trim();
       const pld = await encryptMessage(text, user.loveKey || '');
-      onSendMessage({ textEncrypted: pld.ciphertext, iv: pld.iv });
+      
+      let replyToId: string | undefined = undefined;
+      let replyToText: string | undefined = undefined;
+
+      if (replyingTo) {
+        replyToId = replyingTo.id;
+        const decryptedReplied = decryptedCache[replyingTo.id];
+        if (decryptedReplied) {
+          if (decryptedReplied.startsWith('[VOICE_NOTE]:')) {
+            replyToText = '🎤 Voice Note';
+          } else if (decryptedReplied.startsWith('[IMAGE_ATTACHMENT]:')) {
+            replyToText = '📸 Shared Image';
+          } else if (decryptedReplied.startsWith('[GIF]:')) {
+            replyToText = '💖 Romantic Sticker';
+          } else {
+            replyToText = decryptedReplied.substring(0, 60);
+          }
+        } else {
+          replyToText = 'Locked Message 🔒';
+        }
+      }
+
+      onSendMessage({ 
+        textEncrypted: pld.ciphertext, 
+        iv: pld.iv,
+        replyToId,
+        replyToText
+      });
       setInputText('');
+      setReplyingTo(null);
       
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       onTyping(false);
@@ -442,6 +484,41 @@ export default function ChatRoom({
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
     }
+  };
+
+  // Drag / Swipe to reply handlers
+  const handleMessageSwipeStart = (e: React.TouchEvent | React.MouseEvent, msgId: string) => {
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    touchStartXRef.current = clientX;
+    activeSwipeMsgIdRef.current = msgId;
+  };
+
+  const handleMessageSwipeMove = (e: React.TouchEvent | React.MouseEvent) => {
+    if (touchStartXRef.current === null || activeSwipeMsgIdRef.current === null) return;
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const diffX = clientX - touchStartXRef.current;
+    
+    // Only register right swipe
+    if (diffX > 0) {
+      setSwipeTranslation({ [activeSwipeMsgIdRef.current]: Math.min(diffX, 85) });
+    }
+  };
+
+  const handleMessageSwipeEnd = () => {
+    if (activeSwipeMsgIdRef.current !== null) {
+      const translation = swipeTranslation[activeSwipeMsgIdRef.current] || 0;
+      if (translation > 55) {
+        // Trigger reply state
+        const msg = messages.find(m => m.id === activeSwipeMsgIdRef.current);
+        if (msg) {
+          setReplyingTo(msg);
+          playSweetSparkSound();
+        }
+      }
+    }
+    setSwipeTranslation({});
+    touchStartXRef.current = null;
+    activeSwipeMsgIdRef.current = null;
   };
 
   const selectReaction = (msgId: string, emoji: string) => {
@@ -542,18 +619,43 @@ export default function ChatRoom({
                   )}
 
                   <div className="flex flex-col relative">
+                    {/* Swipe reply indicator */}
+                    {(swipeTranslation[msg.id] || 0) > 0 && (
+                      <div 
+                        className="absolute left-[-35px] top-1/2 -translate-y-1/2 flex items-center justify-center text-rose-500 bg-rose-50 dark:bg-stone-800 p-1.5 rounded-full shadow-sm border border-rose-100 dark:border-stone-700 font-bold transition-all z-20"
+                        style={{ 
+                          opacity: Math.min((swipeTranslation[msg.id] || 0) / 50, 1),
+                          transform: `translateY(-50%) scale(${Math.min((swipeTranslation[msg.id] || 0) / 50, 1.2)})` 
+                        }}
+                      >
+                        <Reply size={13} strokeWidth={2.5} />
+                      </div>
+                    )}
                     <div 
-                      onTouchStart={() => handleTouchStart(msg.id)}
-                      onTouchEnd={handleTouchEnd}
-                      onMouseDown={() => handleTouchStart(msg.id)}
-                      onMouseUp={handleTouchEnd}
+                      onTouchStart={(e) => { handleTouchStart(msg.id); handleMessageSwipeStart(e, msg.id); }}
+                      onTouchMove={handleMessageSwipeMove}
+                      onTouchEnd={() => { handleTouchEnd(); handleMessageSwipeEnd(); }}
+                      onMouseDown={(e) => { handleTouchStart(msg.id); handleMessageSwipeStart(e, msg.id); }}
+                      onMouseMove={handleMessageSwipeMove}
+                      onMouseUp={() => { handleTouchEnd(); handleMessageSwipeEnd(); }}
+                      onMouseLeave={handleMessageSwipeEnd}
                       onClick={() => setFocusedMessageId(focusedMessageId === msg.id ? null : msg.id)}
                       className={`px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed transition-all shadow-3xs relative cursor-pointer select-none ${
                         isMe 
-                          ? 'bg-rose-100 text-stone-800 dark:text-stone-200 dark:text-stone-900 dark:text-stone-200 border border-rose-200 rounded-tr-none' 
+                          ? 'bg-rose-100 text-stone-800 dark:text-stone-200 border border-rose-200 rounded-tr-none' 
                           : 'bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-200 border border-stone-200 dark:border-stone-700 rounded-tl-none'
                       }`}
+                      style={{ 
+                        transform: `translateX(${swipeTranslation[msg.id] || 0}px)`, 
+                        transition: swipeTranslation[msg.id] ? 'none' : 'transform 0.25s cubic-bezier(0.1, 0.8, 0.25, 1)' 
+                      }}
                     >
+                      {msg.replyToText && (
+                        <div className="mb-2 px-2.5 py-1.5 bg-black/5 dark:bg-stone-900/40 border-l-2 border-rose-400 rounded-lg text-[10px] text-stone-600 dark:text-stone-300 flex flex-col max-w-full">
+                          <span className="font-bold text-rose-500 text-[8px] uppercase tracking-wider">Replied Message</span>
+                          <span className="truncate block italic mt-0.5">{msg.replyToText}</span>
+                        </div>
+                      )}
                       {decryptedVal ? (
                         hasGif ? (
                           <div className="rounded-xl overflow-hidden max-w-[180px]">
@@ -703,8 +805,27 @@ export default function ChatRoom({
       </AnimatePresence>
 
       {/* Chat bottom bar controls */}
-      <div className="p-3 bg-white border-t border-rose-100 flex flex-col gap-2 z-10 select-none">
+      <div className="p-3 bg-white dark:bg-stone-900 border-t border-rose-100 dark:border-stone-800 flex flex-col gap-2 z-10 select-none">
         
+        {replyingTo && (
+          <div className="px-3.5 py-2 bg-rose-50/70 dark:bg-stone-800 border-l-4 border-rose-400 rounded-lg flex items-center justify-between gap-3 text-xs shadow-3xs animate-fade-in select-none">
+            <div className="flex-1 min-w-0">
+              <span className="text-[9px] font-bold text-rose-500 block uppercase tracking-wider">
+                Replying to {replyingTo.senderId === user.id ? 'Yourself' : user.partnerName || 'Partner'}
+              </span>
+              <p className="text-stone-600 dark:text-stone-300 truncate text-[11px] mt-0.5 font-medium">
+                {decryptedCache[replyingTo.id]?.startsWith('[VOICE_NOTE]:') ? '🎤 Voice Note' : decryptedCache[replyingTo.id]?.startsWith('[IMAGE_ATTACHMENT]:') ? '📸 Shared Image' : decryptedCache[replyingTo.id]?.startsWith('[GIF]:') ? '💖 Romantic Sticker' : decryptedCache[replyingTo.id]}
+              </p>
+            </div>
+            <button 
+              onClick={() => setReplyingTo(null)}
+              className="p-1 text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 transition cursor-pointer"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         {isRecording ? (
           <div className="flex items-center justify-between bg-rose-50/50 border border-rose-100 p-2 rounded-2xl animate-pulse">
             <div className="flex items-center gap-2">
