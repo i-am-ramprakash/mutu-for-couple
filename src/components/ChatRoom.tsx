@@ -526,26 +526,13 @@ export default function ChatRoom({
     setFocusedMessageId(null);
   };
 
-  const [viewportHeight, setViewportHeight] = useState<string>('82vh');
+  const [viewportHeight] = useState<string>('100%');
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     
     const handleResize = () => {
-      if (window.visualViewport) {
-        const vv = window.visualViewport;
-        const isMobile = window.innerWidth < 768;
-        if (isMobile && vv.height < window.innerHeight * 0.85) {
-          // Keyboard is active. Calculate available space keeping MuTu headers pristine
-          const headerHeight = 72; // App top header pixel footprint
-          const safeHeight = vv.height - headerHeight;
-          setViewportHeight(`${safeHeight}px`);
-          // Scroll immediately to bottom so last message stays visible
-          setTimeout(scrollToBottom, 80);
-        } else {
-          setViewportHeight('82vh');
-        }
-      }
+      setTimeout(scrollToBottom, 100);
     };
 
     const vv = window.visualViewport;
@@ -654,9 +641,9 @@ export default function ChatRoom({
 
   return (
     <div 
-      className="w-full max-w-2xl mx-auto flex flex-col rounded-3xl glass-card overflow-hidden relative transition-all duration-150" 
+      className="w-full max-w-2xl mx-auto flex flex-col md:rounded-3xl rounded-none glass-card md:border border-none overflow-hidden relative transition-all duration-150 h-full" 
       id="chat_room_wrapper"
-      style={{ ...chatBgStyle, height: viewportHeight }}
+      style={chatBgStyle}
     >
       
       {/* Header section */}

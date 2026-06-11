@@ -1748,8 +1748,33 @@ export default function App() {
     }
   }, [currentUser?.coupleId, handleRefreshUser]);
 
+  // Lock page scrolling when in mobile chat view to ensure no browser header scroll push
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (activeSection === 'chat') {
+      document.documentElement.style.overflow = 'hidden';
+      document.body.style.overflow = 'hidden';
+      document.body.style.position = 'fixed';
+      document.body.style.width = '100%';
+      document.body.style.height = '100%';
+    } else {
+      document.documentElement.style.overflow = '';
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
+      document.body.style.height = '';
+    }
+    return () => {
+      document.documentElement.style.overflow = '';
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
+      document.body.style.height = '';
+    };
+  }, [activeSection]);
+
   return (
-    <div className="min-h-screen pb-20">
+    <div className={`min-h-screen select-text ${activeSection === 'chat' ? 'h-screen max-h-[100dvh] flex flex-col overflow-hidden pb-16 md:pb-20 bg-stone-50 dark:bg-stone-950' : 'pb-20'}`}>
       
       {/* Visual Navigation Bar */}
       <header className="p-4 bg-white/40 dark:bg-stone-900/40 backdrop-blur-md border-b border-rose-100 dark:border-stone-800 flex items-center justify-between sticky top-0 z-40 select-none">
@@ -2242,7 +2267,7 @@ export default function App() {
       </AnimatePresence>
 
       {/* Main Container Wrapper */}
-      <main className="py-4 min-h-[82vh]">
+      <main className={activeSection === 'chat' ? 'flex-1 min-h-0 flex flex-col overflow-hidden py-0' : 'py-4 min-h-[82vh]'}>
         
         {/* Render App Panels dynamically based on Auth/Link states */}
         {!currentUser || !currentUser.partnerId ? (
