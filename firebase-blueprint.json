@@ -1,0 +1,160 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Represents a user account in Nest lover workspace.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "coupleId": { "type": "string" },
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "partnerName": { "type": "string" },
+        "anniversary": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "inviteCode": { "type": "string" },
+        "isSleepMode": { "type": "boolean" }
+      },
+      "required": ["id", "email", "name"]
+    },
+    "Couple": {
+      "title": "Couple",
+      "description": "Represents a linked pair of users.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "user1Id": { "type": "string" },
+        "user2Id": { "type": "string" },
+        "anniversary": { "type": "string" },
+        "inviteCode": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "user1Id", "inviteCode", "status"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Encrypted real-time private messages between the couple.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "coupleId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "textEncrypted": { "type": "string" },
+        "iv": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "reactions": { "type": "array" }
+      },
+      "required": ["id", "coupleId", "senderId", "textEncrypted", "iv", "timestamp"]
+    },
+    "Memory": {
+      "title": "Memory",
+      "description": "Polaroid snapshot memories posted to memory wall.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "coupleId": { "type": "string" },
+        "userId": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "caption": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "likes": { "type": "array" }
+      },
+      "required": ["id", "coupleId", "userId", "photoUrl", "caption", "timestamp"]
+    },
+    "CalendarEvent": {
+      "title": "CalendarEvent",
+      "description": "Love calendar schedules.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "coupleId": { "type": "string" },
+        "title": { "type": "string" },
+        "date": { "type": "string" },
+        "category": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["id", "coupleId", "title", "date", "category", "createdBy"]
+    },
+    "DailyAnswer": {
+      "title": "DailyAnswer",
+      "description": "Lover answers to daily relation-enriching questions.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "coupleId": { "type": "string" },
+        "questionId": { "type": "string" },
+        "userId": { "type": "string" },
+        "answerText": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["id", "coupleId", "questionId", "userId", "answerText", "timestamp"]
+    },
+    "JournalEntry": {
+      "title": "JournalEntry",
+      "description": "Private romantic secret diaries.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "coupleId": { "type": "string" },
+        "userId": { "type": "string" },
+        "mood": { "type": "string" },
+        "contentEncrypted": { "type": "string" },
+        "iv": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["id", "coupleId", "userId", "mood", "contentEncrypted", "iv", "timestamp"]
+    },
+    "BucketItem": {
+      "title": "BucketItem",
+      "description": "Joint bucket lists of adventures and goals.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "coupleId": { "type": "string" },
+        "title": { "type": "string" },
+        "category": { "type": "string" },
+        "completed": { "type": "boolean" },
+        "completedDate": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "suggested": { "type": "boolean" }
+      },
+      "required": ["id", "coupleId", "title", "category", "completed", "createdBy"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Store all individual user credentials and state."
+    },
+    "/couples/{coupleId}": {
+      "schema": "Couple",
+      "description": "Store all coupled links."
+    },
+    "/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Store live chat messages securely."
+    },
+    "/memories/{memoryId}": {
+      "schema": "Memory",
+      "description": "Store photos posted to Memory wall."
+    },
+    "/calendarEvents/{eventId}": {
+      "schema": "CalendarEvent",
+      "description": "Store love scheduled calendar items."
+    },
+    "/dailyAnswers/{answerId}": {
+      "schema": "DailyAnswer",
+      "description": "Answers to daily queries."
+    },
+    "/journalEntries/{entryId}": {
+      "schema": "JournalEntry",
+      "description": "Secret lover journal slots."
+    },
+    "/bucketItems/{itemId}": {
+      "schema": "BucketItem",
+      "description": "Shared sweet adventure lines."
+    }
+  }
+}

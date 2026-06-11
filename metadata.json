@@ -1,0 +1,11 @@
+{
+  "name": "MuTu",
+  "description": "For Couple: A home for hearts that live apart. A virtual home for long-distance relationships featuring real-time private chat, synchronized movie nights, memories timeline, love calendar, and custom calls.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
