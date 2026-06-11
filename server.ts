@@ -345,10 +345,16 @@ app.post('/api/auth/login', async (req, res) => {
   res.json(hydratedUser);
 });
 
+// Keep track of users last seen timestamp dynamically
+const lastSeenMap = new Map<string, number>();
+
 // Hydrate user profiles with partner data dynamically
 function hydrateUser(userId: string): User | undefined {
   const user = db.users.find(u => u.id === userId);
   if (!user) return undefined;
+
+  // Track current user's last active memory
+  lastSeenMap.set(userId, Date.now());
 
   if (user.coupleId) {
     const couple = db.couples.find(c => c.id === user.coupleId);
@@ -378,7 +384,9 @@ function hydrateUser(userId: string): User | undefined {
             partnerPresenceStatus: partner.currentPresenceStatus,
             partnerSleepTime: partner.lastSleepTime,
             partnerHeartbeat: partner.lastHeartbeat,
-            partnerStreakCurrent: partner.streakCurrent
+            partnerStreakCurrent: partner.streakCurrent,
+            partnerOnline: clientSockets.has(partner.id),
+            partnerLastActiveTime: lastSeenMap.get(partner.id) || Date.now() - 60000
           };
         }
       } else {
@@ -1316,9 +1324,12 @@ async function updateStreakAndActivity(userId: string, req: express.Request) {
       deviceAgent,
       timestamp: Date.now()
     };
+    // Security logging has been deactivated per user request to maintain a clean, high-performance database with no telemetry/logs clutter.
+    /*
     if (!db.securityLogs) db.securityLogs = [];
     db.securityLogs.push(newLog);
     addRecord('securityLogs', newLog).catch(e => console.error('Failed to save security log:', e));
+    */
 
     // 2. Continuous Streak Calculation
     const todayStr = new Date().toISOString().split('T')[0];
@@ -2071,7 +2082,14 @@ wss.on('connection', (ws) => {
           boundUserId = event.userId;
           boundCoupleId = event.coupleId || null;
           clientSockets.set(event.userId, ws);
+          lastSeenMap.set(event.userId, Date.now());
           console.log(`WebSocket fully bound for user: ${event.userId}, couple: ${event.coupleId}`);
+          
+          // Broadcast status change immediately to partner
+          const partnerId = getPartnerId(event.userId);
+          if (partnerId) {
+            sendToUser(partnerId, { type: 'state:update', section: 'presence' });
+          }
           break;
         }
 
@@ -2285,7 +2303,13 @@ wss.on('connection', (ws) => {
     if (boundUserId) {
       clientSockets.delete(boundUserId);
       activeChatUsers.delete(boundUserId);
+      lastSeenMap.set(boundUserId, Date.now());
       console.log(`WebSocket socket closed for user: ${boundUserId}`);
+      
+      const partnerId = getPartnerId(boundUserId);
+      if (partnerId) {
+        sendToUser(partnerId, { type: 'state:update', section: 'presence' });
+      }
     }
   });
 });

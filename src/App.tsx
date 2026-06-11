@@ -721,7 +721,7 @@ export default function App() {
               if (payload.section === 'stats') {
                 fetchStatsAndAnswers();
               }
-              if (payload.section === 'profile') {
+              if (payload.section === 'profile' || payload.section === 'presence') {
                 handleRefreshUser();
               }
               if (payload.section === 'sleep_on') {
@@ -1071,24 +1071,54 @@ export default function App() {
   // 6. Media and Calling handlers
   const initiateMediaStream = async (modeOverride?: 'voice' | 'video') => {
     const selectedMode = modeOverride || callTypeRef.current;
+    
+    // Multi-factor robust media constraints to ensure 100% compatibility across iOS, Android, Safari, and Chrome PWAs
+    const attemptGetUserMedia = async (constraints: MediaStreamConstraints) => {
+      try {
+        return await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (err) {
+        console.warn(`[Media] getUserMedia failed with constraints ${JSON.stringify(constraints)}, attempting fallback...`, err);
+        return null;
+      }
+    };
+
     try {
-      // Premium Ultra HD video + studio crystal-clear audio setup
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: selectedMode === 'video' 
-          ? { 
-              width: { ideal: 1920, max: 3840 }, 
-              height: { ideal: 1080, max: 2160 },
-              frameRate: { ideal: 60, max: 60 }
-            } 
-          : false,
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          channelCount: 2,
-          sampleRate: 48000
+      let stream: MediaStream | null = null;
+      
+      if (selectedMode === 'video') {
+        // Attempt 1: HD Front camera setup
+        stream = await attemptGetUserMedia({
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+          audio: { echoCancellation: true, noiseSuppression: true }
+        });
+        
+        // Attempt 2: Simple Video + Audio fallback
+        if (!stream) {
+          stream = await attemptGetUserMedia({
+            video: true,
+            audio: true
+          });
         }
-      });
+      } else {
+        // Voice only setup
+        stream = await attemptGetUserMedia({
+          video: false,
+          audio: { echoCancellation: true, noiseSuppression: true }
+        });
+        
+        // Voice simple fallback
+        if (!stream) {
+          stream = await attemptGetUserMedia({
+            video: false,
+            audio: true
+          });
+        }
+      }
+
+      if (!stream) {
+        throw new Error("No media capture could be acquired after trying all fallbacks.");
+      }
+
       setLocalStream(stream);
       localStreamRef.current = stream;
       
@@ -1373,6 +1403,12 @@ export default function App() {
     callTypeRef.current = mode;
     setIncomingCall(true);
     setRingingRole('caller');
+
+    // Warm up media elements within the user gesture context to bypass mobile Safari/PWA autoplay restrictions
+    try {
+      if (partnerVideoRef.current) partnerVideoRef.current.play().catch(() => {});
+      if (remoteAudioRef.current) remoteAudioRef.current.play().catch(() => {});
+    } catch (_) {}
     
     // Warm up local media stream immediately
     const stream = await initiateMediaStream(mode);
@@ -1394,6 +1430,12 @@ export default function App() {
     setIncomingCall(false);
     setCallActive(true);
     setRingingRole(null);
+
+    // Warm up media elements within the user gesture context to bypass mobile Safari/PWA autoplay restrictions
+    try {
+      if (partnerVideoRef.current) partnerVideoRef.current.play().catch(() => {});
+      if (remoteAudioRef.current) remoteAudioRef.current.play().catch(() => {});
+    } catch (_) {}
 
     // 1. Warm up the local media stream FIRST to avoid race descriptor on incoming offer
     const stream = await initiateMediaStream(callType);
@@ -2347,7 +2389,8 @@ export default function App() {
                 <audio
                   ref={remoteAudioRef}
                   autoPlay
-                  style={{ display: 'none' }}
+                  playsInline
+                  className="opacity-0 w-0 h-0 absolute pointer-events-none"
                 />
                 <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-rose-500 to-pink-500 border-2 border-white/10 flex items-center justify-center text-5xl relative">
                   <div className="absolute inset-0 rounded-full border border-rose-500/50 animate-ping"></div>

@@ -49,6 +49,8 @@ export interface User {
   partnerSleepTime?: string;
   partnerHeartbeat?: number;
   partnerStreakCurrent?: number;
+  partnerLastActiveTime?: number; // Epoch timestamp representing when they were last active/online
+  partnerOnline?: boolean; // Live websocket connection status
 }
 
 export interface LockedLetter {
@@ -228,4 +230,4 @@ export type WSEvent =
   | { type: 'call:sdp-offer'; sdp: any; targetId: string }
   | { type: 'call:sdp-answer'; sdp: any; targetId: string }
   | { type: 'presence:update'; userId: string; status: string; sleepTime?: string; heartbeat?: number }
-  | { type: 'state:update'; section: 'memories' | 'calendar' | 'journal' | 'daily' | 'stats' | 'profile' | 'sleep_on' | 'sleep_off' | 'bucket' | 'locked-letters' | 'decorations' | 'timeline' | 'music' };
+  | { type: 'state:update'; section: 'memories' | 'calendar' | 'journal' | 'daily' | 'stats' | 'profile' | 'sleep_on' | 'sleep_off' | 'bucket' | 'locked-letters' | 'decorations' | 'timeline' | 'music' | 'presence' };

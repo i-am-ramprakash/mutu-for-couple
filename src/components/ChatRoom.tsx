@@ -526,15 +526,137 @@ export default function ChatRoom({
     setFocusedMessageId(null);
   };
 
+  const [viewportHeight, setViewportHeight] = useState<string>('82vh');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    
+    const handleResize = () => {
+      if (window.visualViewport) {
+        const vv = window.visualViewport;
+        const isMobile = window.innerWidth < 768;
+        if (isMobile && vv.height < window.innerHeight * 0.85) {
+          // Keyboard is active. Calculate available space keeping MuTu headers pristine
+          const headerHeight = 72; // App top header pixel footprint
+          const safeHeight = vv.height - headerHeight;
+          setViewportHeight(`${safeHeight}px`);
+          // Scroll immediately to bottom so last message stays visible
+          setTimeout(scrollToBottom, 80);
+        } else {
+          setViewportHeight('82vh');
+        }
+      }
+    };
+
+    const vv = window.visualViewport;
+    if (vv) {
+      vv.addEventListener('resize', handleResize);
+      vv.addEventListener('scroll', handleResize);
+    }
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      if (vv) {
+        vv.removeEventListener('resize', handleResize);
+        vv.removeEventListener('scroll', handleResize);
+      }
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
+
+  const [activeSeconds, setActiveSeconds] = useState<number>(0);
+
+  // Live active partner session chronometer
+  useEffect(() => {
+    if (!user.partnerOnline) {
+      setActiveSeconds(0);
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setActiveSeconds((prev) => prev + 1);
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [user.partnerOnline]);
+
+  const formatChronometer = (totalSecs: number) => {
+    const hrs = Math.floor(totalSecs / 3600);
+    const mins = Math.floor((totalSecs % 3600) / 60);
+    const secs = totalSecs % 60;
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const getPartnerStatusLabel = () => {
+    if (typingPartner) {
+      return (
+        <span className="text-[10px] text-pink-500 font-bold animate-pulse flex items-center gap-1">
+          ✍️ My Dearest is writing...
+        </span>
+      );
+    }
+
+    if (user.partnerOnline) {
+      return (
+        <span className="text-[10px] text-emerald-500 font-bold flex items-center gap-1 relative pl-3.5 pr-2">
+          <span className="w-2.5 h-2.5 bg-emerald-500/30 rounded-full animate-ping absolute left-0" />
+          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full absolute left-0.5" />
+          <span>Beloved online • {formatChronometer(activeSeconds || 1)}</span>
+        </span>
+      );
+    }
+
+    // Partner is offline/away. Format distance since active using user.partnerLastActiveTime
+    if (user.partnerLastActiveTime) {
+      const diffMs = Date.now() - user.partnerLastActiveTime;
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHrs = Math.floor(diffMins / 60);
+
+      if (diffMins < 1) {
+        return (
+          <span className="text-[10px] text-stone-400 font-bold">
+            Beloved was just active
+          </span>
+        );
+      }
+      if (diffMins < 60) {
+        return (
+          <span className="text-[10px] text-stone-400 font-bold">
+            Beloved active {diffMins}m ago
+          </span>
+        );
+      }
+      if (diffHrs < 24) {
+        const remainingMins = diffMins % 60;
+        return (
+          <span className="text-[10px] text-stone-400 font-bold">
+            Beloved active {diffHrs}h {remainingMins}m ago
+          </span>
+        );
+      }
+      return (
+        <span className="text-[10px] text-stone-400 font-bold">
+          Beloved is sleeping off-grid 💤
+        </span>
+      );
+    }
+
+    return (
+      <span className="text-[10px] text-stone-400 font-bold">
+        Beloved resting 💤
+      </span>
+    );
+  };
+
   const chatBgStyle = user.chatBackground 
     ? { background: user.chatBackground.startsWith('http') ? `url(${user.chatBackground}) center/cover no-repeat` : user.chatBackground }
     : {};
 
   return (
     <div 
-      className="w-full max-w-2xl mx-auto flex flex-col h-[82vh] rounded-3xl glass-card overflow-hidden relative" 
+      className="w-full max-w-2xl mx-auto flex flex-col rounded-3xl glass-card overflow-hidden relative transition-all duration-150" 
       id="chat_room_wrapper"
-      style={chatBgStyle}
+      style={{ ...chatBgStyle, height: viewportHeight }}
     >
       
       {/* Header section */}
@@ -558,10 +680,9 @@ export default function ChatRoom({
             </div>
             <div>
               <h3 className="font-bold text-xs text-stone-700 dark:text-stone-300 leading-none truncate max-w-[120px] md:max-w-[180px]" title={user.partnerName || 'Partner'}>{user.partnerName || 'Partner'}</h3>
-              <p className="text-[10px] text-emerald-500 font-medium flex items-center gap-1 mt-0.5 animate-pulse">
-                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span> 
-                {typingPartner ? 'Writing a letter...' : 'Online partner'}
-              </p>
+              <div className="mt-0.5 flex items-center min-h-[14px]">
+                {getPartnerStatusLabel()}
+              </div>
             </div>
           </div>
         </div>
@@ -642,7 +763,7 @@ export default function ChatRoom({
                       onClick={() => setFocusedMessageId(focusedMessageId === msg.id ? null : msg.id)}
                       className={`px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed transition-all shadow-3xs relative cursor-pointer select-none ${
                         isMe 
-                          ? 'bg-rose-100 text-stone-800 dark:text-stone-200 border border-rose-200 rounded-tr-none' 
+                          ? 'bg-rose-100 text-stone-800 border-rose-200 dark:bg-rose-900/70 dark:text-rose-50 dark:border-rose-800 rounded-tr-none' 
                           : 'bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-200 border border-stone-200 dark:border-stone-700 rounded-tl-none'
                       }`}
                       style={{ 
