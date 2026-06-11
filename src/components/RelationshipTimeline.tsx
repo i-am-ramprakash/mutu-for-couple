@@ -172,6 +172,7 @@ export default function RelationshipTimeline({ user, onBack }: RelationshipTimel
               <label className="text-[10px] font-bold text-stone-500 dark:text-stone-400 uppercase">Completion Date</label>
               <input
                 type="date"
+                max={new Date().toISOString().split('T')[0]}
                 required
                 value={eventDate}
                 onChange={(e) => setEventDate(e.target.value)}

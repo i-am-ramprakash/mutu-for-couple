@@ -18,11 +18,11 @@ import {
 } from './src/utils/firestore';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
 
-// Boost body size limits to permit profile custom base64 avatars and journal/memory photos
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+// Boost body size limits to permit profile custom base64 avatars and journal/memory photos and movies
+app.use(express.json({ limit: '3000mb' }));
+app.use(express.urlencoded({ limit: '3000mb', extended: true }));
 
 // Ensure /data exists for persistent JSON-based db storage
 const DATA_DIR = path.join(process.cwd(), 'data');

@@ -515,6 +515,7 @@ export default function HomeDashboard({
                     <label className="block text-[10px] font-bold text-stone-500 dark:text-stone-400 mb-1">Relationship Start Date</label>
                     <input
                       type="date"
+                      max={new Date().toISOString().split('T')[0]}
                       required
                       value={newAnniversary}
                       onChange={(e) => setNewAnniversary(e.target.value)}
@@ -604,7 +605,7 @@ export default function HomeDashboard({
 
           {/* Location Editor Drawer */}
           {showLocationEditor && (
-            <div className="bg-rose-50/70 p-4 rounded-3xl border border-rose-200/50 mb-4 text-xs space-y-3">
+            <div className="bg-rose-50/70 dark:bg-stone-800/50 p-4 rounded-3xl border border-rose-200/50 dark:border-stone-700/50 mb-4 text-xs space-y-3">
               <h5 className="font-bold text-stone-700 dark:text-stone-200">Configure Your Location Settings</h5>
               <div className="grid grid-cols-2 gap-2">
                 <div>
@@ -614,7 +615,7 @@ export default function HomeDashboard({
                     placeholder="e.g. Paris"
                     value={cityInput}
                     onChange={(e) => setCityInput(e.target.value)}
-                    className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white"
+                    className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100"
                   />
                 </div>
                 <div>
@@ -622,7 +623,7 @@ export default function HomeDashboard({
                   <select 
                     value={timezoneInput}
                     onChange={(e) => setTimezoneInput(e.target.value)}
-                    className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white"
+                    className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100"
                   >
                     <option value="-8">GMT-8 (PST)</option>
                     <option value="-5">GMT-5 (EST)</option>
@@ -642,14 +643,14 @@ export default function HomeDashboard({
                   placeholder="e.g. ☀️ Sunny, 21°C - misses you!"
                   value={weatherInput}
                   onChange={(e) => setWeatherInput(e.target.value)}
-                  className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white"
+                  className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100"
                 />
               </div>
               <div className="flex justify-end gap-2 pt-1">
                 <button 
                   type="button" 
                   onClick={() => setShowLocationEditor(false)}
-                  className="px-3 py-1.5 text-[10px] text-stone-500 bg-white border border-stone-205 rounded-xl font-bold cursor-pointer"
+                  className="px-3 py-1.5 text-[10px] text-stone-500 dark:text-stone-300 bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-xl font-bold cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -712,7 +713,7 @@ export default function HomeDashboard({
                     className={`px-2 py-1 text-[10px] rounded-xl border transition-all shrink-0 cursor-pointer flex items-center gap-1 ${
                       user.checkInMood === m.label 
                         ? 'bg-rose-500 text-white border-rose-500 font-bold scale-102 shadow-xs' 
-                        : 'bg-stone-50 hover:bg-stone-100 border-stone-200 text-stone-600 dark:text-stone-300'
+                        : 'bg-stone-50 dark:bg-stone-800 hover:bg-stone-100 dark:hover:bg-stone-700 border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300'
                     }`}
                   >
                     <span>{m.icon}</span> <span>{m.label}</span>
@@ -733,7 +734,7 @@ export default function HomeDashboard({
                     className={`px-2.5 py-1 text-[10px] rounded-xl border transition-all shrink-0 cursor-pointer ${
                       user.checkInLoveLanguage === lang 
                         ? 'bg-purple-600 text-white border-purple-600 font-bold scale-102 shadow-xs' 
-                        : 'bg-stone-50 hover:bg-stone-100 border-stone-200 text-stone-600 dark:text-stone-300'
+                        : 'bg-stone-50 dark:bg-stone-800 hover:bg-stone-100 dark:hover:bg-stone-700 border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300'
                     }`}
                   >
                     {lang}
@@ -908,22 +909,6 @@ export default function HomeDashboard({
             <span className="text-xs font-bold text-orange-400 block uppercase tracking-wider">Heritage</span>
             <h4 className="font-bold text-base text-stone-700 dark:text-stone-200 mt-0.5">Timeline Engine</h4>
             <p className="text-[10px] text-stone-400 mt-1">First call, message milestones and automatic memory anniversary alerts.</p>
-          </div>
-        </button>
-
-        {/* 2. Cozy Home Customization */}
-        <button
-          onClick={() => onSectionSelect('home_customization')}
-          className="p-5 rounded-3xl glass-card border border-amber-200/40 bg-amber-50/5 flex flex-col justify-between items-start text-left hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer group"
-          id="nav_room_home_customization"
-        >
-          <div className="bg-amber-100 text-amber-600 p-2.5 rounded-2xl group-hover:bg-amber-500 group-hover:text-white transition-colors">
-            <Home size={20} />
-          </div>
-          <div className="mt-4">
-            <span className="text-xs font-bold text-amber-500 block uppercase tracking-wider">Sanctuary</span>
-            <h4 className="font-bold text-base text-stone-700 dark:text-stone-200 mt-0.5">Nest Designer</h4>
-            <p className="text-[10px] text-stone-400 mt-1">Furnish virtual living rooms, place plants, pets & hang custom polaroids.</p>
           </div>
         </button>
 

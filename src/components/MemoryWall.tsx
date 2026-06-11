@@ -203,6 +203,7 @@ export default function MemoryWall({ user, onBack, memories, onAddMemory }: Memo
                         <Calendar size={13} className="absolute left-3 top-2.5 text-rose-300" />
                         <input
                           type="date"
+                          max={new Date().toISOString().split('T')[0]}
                           value={date}
                           onChange={(e) => setDate(e.target.value)}
                           className="w-full pl-8 pr-2.5 py-2 hover:bg-rose-50 text-[11px] rounded-xl border border-rose-100 focus:outline-none"

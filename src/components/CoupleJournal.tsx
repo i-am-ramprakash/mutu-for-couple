@@ -209,6 +209,7 @@ export default function CoupleJournal({ user, onBack, entries, onAddEntry }: Cou
                     <label className="block text-xs font-bold text-stone-500 dark:text-stone-400 mb-1">Diary Date</label>
                     <input
                       type="date"
+                      max={new Date().toISOString().split('T')[0]}
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
                       className="w-full text-xs px-3 py-1.5 border border-rose-100 dark:border-stone-700 rounded-xl focus:outline-none bg-stone-50 dark:bg-stone-800 text-stone-800 dark:text-stone-100"

@@ -16,13 +16,6 @@ interface MovieRoomProps {
   onEmitMovieSync: (state: MovieState) => void;
 }
 
-// Romantic and cinematic nature loop video choices
-const RECOMMENDED_MOVIES = [
-  { title: 'Romantic Pastel Forest Loop 🌸', url: 'https://assets.mixkit.co/videos/preview/mixkit-sakura-trees-with-pink-flowers-in-spring-44391-large.mp4' },
-  { title: 'Golden Hour Ocean Shore 🌅', url: 'https://assets.mixkit.co/videos/preview/mixkit-waves-crashing-on-the-shore-during-golden-hour-42289-large.mp4' },
-  { title: 'Warm Crackling Fireplace 🔥', url: 'https://assets.mixkit.co/videos/preview/mixkit-log-fireplace-burning-interior-decor-34062-large.mp4' }
-];
-
 interface UploadedMovie {
   id: string;
   filename: string;
@@ -40,7 +33,7 @@ interface WatchHistory {
 export default function MovieRoom({ 
   user, onBack, messages, onSendChatMessage, movieSyncState, onEmitMovieSync 
 }: MovieRoomProps) {
-  const [selectedVideo, setSelectedVideo] = useState(RECOMMENDED_MOVIES[0]);
+  const [selectedVideo, setSelectedVideo] = useState({ title: 'No Movie Selected', url: '' });
   const [customUrl, setCustomUrl] = useState('');
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [sideChatInput, setSideChatInput] = useState('');
@@ -48,7 +41,7 @@ export default function MovieRoom({
   // Custom uploaded movies & watched history states
   const [uploadedMovies, setUploadedMovies] = useState<UploadedMovie[]>([]);
   const [watchHistory, setWatchHistory] = useState<WatchHistory[]>([]);
-  const [activeTab, setActiveTab] = useState<'presets' | 'uploads' | 'history'>('presets');
+  const [activeTab, setActiveTab] = useState<'uploads' | 'history'>('uploads');
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -127,11 +120,9 @@ export default function MovieRoom({
     if (movieSyncState.videoUrl && player.src !== movieSyncState.videoUrl) {
       isRemoteSyncRef.current = true;
       player.src = movieSyncState.videoUrl;
-      const matched = RECOMMENDED_MOVIES.find(m => m.url === movieSyncState.videoUrl);
       const matchedUpload = uploadedMovies.find(m => m.url === movieSyncState.videoUrl);
       
       setSelectedVideo(
-        matched || 
         matchedUpload || 
         { title: movieSyncState.videoTitle, url: movieSyncState.videoUrl }
       );
@@ -217,18 +208,6 @@ export default function MovieRoom({
     addWatchHistory(customVid.title);
   };
 
-  const handleLoadPreset = (movie: typeof RECOMMENDED_MOVIES[0]) => {
-    setSelectedVideo(movie);
-    setTimeout(() => {
-      if (videoRef.current) {
-        videoRef.current.src = movie.url;
-        videoRef.current.currentTime = 0;
-        emitSyncState(false);
-      }
-    }, 200);
-    addWatchHistory(movie.title);
-  };
-
   const handleLoadUploaded = (movie: UploadedMovie) => {
     const active = { title: movie.filename, url: movie.url };
     setSelectedVideo(active);
@@ -261,9 +240,9 @@ export default function MovieRoom({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Check size limit (e.g. 100MB is generally readable inside localhost/container)
-    if (file.size > 100 * 1024 * 1024) {
-      setUploadError('Please choose a stream clip under 100MB.');
+    // Check size limit (e.g. 3GB limit per user request)
+    if (file.size > 3000 * 1024 * 1024) {
+      setUploadError('Please choose a stream clip under 3GB.');
       return;
     }
 
@@ -457,12 +436,6 @@ export default function MovieRoom({
           <div className="bg-white border border-rose-100/60 rounded-3xl p-5 shadow-3xs">
             <div className="flex border-b border-rose-100 pb-2 mb-4 gap-4 text-xs font-semibold">
               <button
-                onClick={() => setActiveTab('presets')}
-                className={`pb-2 px-1 transition-all flex items-center gap-1.5 ${activeTab === 'presets' ? 'text-rose-600 border-b-2 border-rose-500' : 'text-stone-400 hover:text-stone-600'}`}
-              >
-                <Sparkles size={13} /> Preset Loops
-              </button>
-              <button
                 onClick={() => setActiveTab('uploads')}
                 className={`pb-2 px-1 transition-all flex items-center gap-1.5 relative ${activeTab === 'uploads' ? 'text-rose-600 border-b-2 border-rose-500' : 'text-stone-400 hover:text-stone-600'}`}
               >
@@ -480,26 +453,6 @@ export default function MovieRoom({
             </div>
 
             <div className="min-h-[110px]">
-              {/* Presets */}
-              {activeTab === 'presets' && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {RECOMMENDED_MOVIES.map((movie, index) => (
-                    <button
-                      key={index}
-                      onClick={() => handleLoadPreset(movie)}
-                      className={`p-3.5 text-left rounded-2xl text-xs transition-all border flex items-center gap-2 ${
-                        selectedVideo.url === movie.url 
-                          ? 'border-rose-400 bg-rose-50/60 text-rose-600 font-bold shadow-3xs' 
-                          : 'border-stone-100 bg-white text-stone-500 hover:bg-stone-50'
-                      }`}
-                    >
-                      <PlayCircle size={14} className="shrink-0" />
-                      <span className="truncate">{movie.title}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-
               {/* Uploads */}
               {activeTab === 'uploads' && (
                 <div className="space-y-2">
@@ -565,15 +518,15 @@ export default function MovieRoom({
         </div>
 
         {/* Right Side: Shared Reaction chat loop */}
-        <div className="lg:col-span-1 flex flex-col h-[520px] bg-white rounded-3xl border border-rose-100 overflow-hidden shadow-3xs" id="movie_commentary_sidebar">
-          <div className="p-3.5 bg-rose-50/50 border-b border-rose-100 flex items-center justify-between shadow-3xs">
-            <span className="text-xs font-bold text-stone-600 flex items-center gap-1">
+        <div className="lg:col-span-1 flex flex-col h-[520px] bg-white dark:bg-stone-900 rounded-3xl border border-rose-100 dark:border-stone-800 overflow-hidden shadow-3xs" id="movie_commentary_sidebar">
+          <div className="p-3.5 bg-rose-50/50 dark:bg-stone-800/50 border-b border-rose-100 dark:border-stone-800 flex items-center justify-between shadow-3xs">
+            <span className="text-xs font-bold text-stone-600 dark:text-stone-300 flex items-center gap-1">
               <MessageSquare size={13} className="text-rose-400" /> Cinema Reaction
             </span>
             <span className="text-[8px] bg-emerald-100 text-emerald-700 font-bold px-1.5 py-0.5 rounded-full select-none uppercase tracking-wide">Live Stream</span>
           </div>
 
-          <div className="flex-1 p-3 space-y-2 overflow-y-auto bg-stone-50/30">
+          <div className="flex-1 p-3 space-y-2 overflow-y-auto bg-stone-50/30 dark:bg-stone-900/30">
             {messages.length === 0 ? (
               <p className="text-[10px] text-stone-400 text-center py-12 leading-relaxed">No live inputs yet. Feel free to type comments below as the movie streams! 🥰</p>
             ) : (
@@ -595,13 +548,13 @@ export default function MovieRoom({
             )}
           </div>
 
-          <form onSubmit={handleSendCommentary} className="p-2 border-t border-rose-100 bg-white flex items-center gap-1.5 shadow-md">
+          <form onSubmit={handleSendCommentary} className="p-2 border-t border-rose-100 dark:border-stone-800 bg-white dark:bg-stone-900 flex items-center gap-1.5 shadow-md">
             <input
               type="text"
               placeholder="Love thoughts... 🥰"
               value={sideChatInput}
               onChange={(e) => setSideChatInput(e.target.value)}
-              className="flex-1 text-[11px] px-2.5 py-2 border border-rose-100 rounded-xl bg-stone-50 focus:outline-none focus:bg-white"
+              className="flex-1 text-[11px] px-2.5 py-2 border border-rose-100 dark:border-stone-700 rounded-xl bg-stone-50 dark:bg-stone-800 focus:outline-none focus:bg-white dark:focus:bg-stone-700 text-stone-900 dark:text-stone-100"
             />
             <button
               type="submit"

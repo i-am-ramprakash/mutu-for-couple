@@ -158,6 +158,7 @@ export default function LoveCalendar({ user, onBack, events, onAddEvent }: LoveC
                   <label className="block text-xs font-semibold text-stone-500 mb-1">Target Date</label>
                   <input
                     type="date"
+                    max={new Date().toISOString().split('T')[0]}
                     value={date}
                     onChange={(e) => setDate(e.target.value)}
                     className="w-full text-xs px-3 py-2 border border-rose-100 rounded-xl bg-stone-50/50 focus:outline-none"

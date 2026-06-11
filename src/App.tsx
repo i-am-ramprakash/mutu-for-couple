@@ -19,7 +19,6 @@ import {
 
 import RelationshipAnalytics from './components/RelationshipAnalytics';
 import RelationshipTimeline from './components/RelationshipTimeline';
-import HomeCustomizer from './components/HomeCustomizer';
 import AILoveAssistant from './components/AILoveAssistant';
 import SharedMusic from './components/SharedMusic';
 import SafetyCenter from './components/SafetyCenter';
@@ -1616,13 +1615,7 @@ export default function App() {
             onBack={handleBack}
           />
         );
-      case 'home_customization':
-        return (
-          <HomeCustomizer
-            user={currentUser}
-            onBack={handleBack}
-          />
-        );
+
       case 'copilot':
         return (
           <AILoveAssistant
