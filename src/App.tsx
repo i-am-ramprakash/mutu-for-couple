@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Heart, Phone, Video, PhoneOff, Mic, MicOff, Camera, 
   CameraOff, Sparkles, LogOut, Info, ShieldCheck, RefreshCw,
-  Moon, Sun, Volume2, VolumeX, AlertCircle, Home, MessageSquare,
+  Moon, Sun, Volume2, VolumeX, AlertCircle, Home, MessageSquare, Monitor,
   BookOpen, Calendar, Award, Activity, Bell, X, Trash2, Globe, Sparkle
 } from 'lucide-react';
 
@@ -186,6 +186,34 @@ export default function App() {
     localStorage.setItem('mutu_active_section', activeSection);
   }, [activeSection]);
 
+  const [viewportHeight, setViewportHeight] = useState<number | null>(null);
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const handleResize = () => {
+      setViewportHeight(vv.height);
+      const isKeyboard = vv.height < window.innerHeight * 0.85;
+      setIsKeyboardOpen(isKeyboard);
+      if (activeSection === 'chat') {
+        window.scrollTo(0, 0);
+        document.body.scrollTop = 0;
+      }
+    };
+
+    vv.addEventListener('resize', handleResize);
+    vv.addEventListener('scroll', handleResize);
+    handleResize();
+
+    return () => {
+      vv.removeEventListener('resize', handleResize);
+      vv.removeEventListener('scroll', handleResize);
+    };
+  }, [activeSection]);
+
   // Prevent page moving up and down by placing viewport at top of screen instantly
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'instant' as any });
@@ -283,10 +311,27 @@ export default function App() {
 
   // WebRTC & Call states
   const [callActive, setCallActive] = useState(false);
+  const [callDuration, setCallDuration] = useState<number>(0);
   const [incomingCall, setIncomingCall] = useState(false);
   const [ringingRole, setRingingRole] = useState<'caller' | 'callee' | null>(null);
   const [callType, setCallType] = useState<'voice' | 'video'>('video');
   const [calleeName, setCalleeName] = useState('');
+
+  // Call duration counter timer effect
+  useEffect(() => {
+    let interval: any = null;
+    if (callActive) {
+      setCallDuration(0);
+      interval = setInterval(() => {
+        setCallDuration(prev => prev + 1);
+      }, 1000);
+    } else {
+      setCallDuration(0);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [callActive]);
   
   // Audio/Video streams state
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -297,6 +342,11 @@ export default function App() {
 
   const [localTracksCount, setLocalTracksCount] = useState(0);
   const [remoteTracksCount, setRemoteTracksCount] = useState(0);
+
+  // Additional active call features
+  const [isScreensharing, setIsScreensharing] = useState(false);
+  const [isSpeakerActive, setIsSpeakerActive] = useState(true);
+  const screenshareStreamRef = useRef<MediaStream | null>(null);
 
   // Monitor tracks changes in local stream to trigger re-bind on stream size changes
   useEffect(() => {
@@ -401,6 +451,38 @@ export default function App() {
   const [showTour, setShowTour] = useState(false);
 
   // Save notification helpers
+  const [notificationPermission, setNotificationPermission] = useState<string>(() => {
+    return typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported';
+  });
+
+  const requestNotificationPermission = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setNotificationPermission('unsupported');
+      return;
+    }
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      if (permission === 'granted') {
+        const testNotification = new Notification("🔔 MuTu Alerts Enabled!", {
+          body: "You'll now receive smartphone notifications for chat, events, and calls! 🥰",
+          icon: '/favicon.ico'
+        });
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.ready.then(reg => {
+            reg.showNotification("🔔 MuTu Alerts Enabled!", {
+              body: "You'll now receive smartphone notifications for chat, events, and calls! 🥰",
+              icon: '/favicon.ico'
+            });
+          }).catch(() => {});
+        }
+      }
+    } catch (err) {
+      console.warn('Failed requesting notification permission:', err);
+    }
+  };
+
+  // Save notification helpers and dispatch native OS alerts for smartphones & background shades
   const showPushNotification = useCallback((title: string, body: string, type = 'system', section?: string) => {
     const id = 'nt_' + Math.random().toString(36).substring(2, 9);
     setToast({ id, type, title, body });
@@ -410,6 +492,32 @@ export default function App() {
       localStorage.setItem('mutu_notifications_history', JSON.stringify(updated));
       return updated;
     });
+
+    // Native smartphone alerts integration (Web Notification API & ServiceWorker push panel)
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+      try {
+        // High compatibility fallback for mobile devices
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.ready.then((reg) => {
+            reg.showNotification(title, {
+              body: body,
+              icon: '/favicon.ico',
+              tag: id,
+              badge: '/favicon.ico',
+              vibrate: [200, 100, 200],
+              data: { section, id }
+            } as any);
+          }).catch(() => {
+            // Backup direct notification in case sw ready fails
+            new Notification(title, { body, icon: '/favicon.ico', tag: id });
+          });
+        } else {
+          new Notification(title, { body, icon: '/favicon.ico', tag: id });
+        }
+      } catch (err) {
+        console.warn('[Notification] Direct construct failed, trying direct option:', err);
+      }
+    }
 
     setTimeout(() => {
       setToast(prev => prev?.id === id ? null : prev);
@@ -1099,6 +1207,14 @@ export default function App() {
             audio: true
           });
         }
+
+        // Attempt 3: Ultimate Video-only fallback (in case mic permission is blocked or throws)
+        if (!stream) {
+          stream = await attemptGetUserMedia({
+            video: true,
+            audio: false
+          });
+        }
       } else {
         // Voice only setup
         stream = await attemptGetUserMedia({
@@ -1110,6 +1226,13 @@ export default function App() {
         if (!stream) {
           stream = await attemptGetUserMedia({
             video: false,
+            audio: true
+          });
+        }
+
+        // Voice absolute ultimate fallback (some systems fail with explicit video: false query)
+        if (!stream) {
+          stream = await attemptGetUserMedia({
             audio: true
           });
         }
@@ -1130,6 +1253,82 @@ export default function App() {
     } catch (err) {
       console.warn('Media captures denied or camera missing (normal in sandboxed iframes). Proceeding with simulated calling visual overlays.', err);
       return null;
+    }
+  };
+
+  const toggleScreenshare = async () => {
+    if (callType !== 'video') {
+      alert('Screensharing requires an active video call.');
+      return;
+    }
+
+    if (isScreensharing) {
+      stopScreenshare();
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        screenshareStreamRef.current = stream;
+        setIsScreensharing(true);
+
+        const screenTrack = stream.getVideoTracks()[0];
+        
+        // Find existing PeerConnection and swap video track
+        const pc = peerConnectionRef.current;
+        if (pc) {
+          const senders = pc.getSenders();
+          const videoSender = senders.find(sender => sender.track && sender.track.kind === 'video');
+          if (videoSender) {
+            videoSender.replaceTrack(screenTrack);
+          }
+        }
+
+        // Redirect local mini feedback video tag source
+        if (myVideoRef.current) {
+          myVideoRef.current.srcObject = stream;
+        }
+
+        // Return to normal camera video if track ends (e.g. from browser banner)
+        screenTrack.onended = () => {
+          stopScreenshare();
+        };
+      } catch (err) {
+        console.error('[WebRTC] DisplayMedia capture failed:', err);
+      }
+    }
+  };
+
+  const stopScreenshare = () => {
+    if (screenshareStreamRef.current) {
+      screenshareStreamRef.current.getTracks().forEach(track => track.stop());
+      screenshareStreamRef.current = null;
+    }
+    setIsScreensharing(false);
+
+    const pc = peerConnectionRef.current;
+    if (pc && localStreamRef.current) {
+      const cameraTrack = localStreamRef.current.getVideoTracks()[0];
+      if (cameraTrack) {
+        const senders = pc.getSenders();
+        const videoSender = senders.find(sender => sender.track && sender.track.kind === 'video');
+        if (videoSender) {
+          videoSender.replaceTrack(cameraTrack);
+        }
+      }
+    }
+
+    if (myVideoRef.current && localStreamRef.current) {
+      myVideoRef.current.srcObject = localStreamRef.current;
+    }
+  };
+
+  const toggleSpeaker = () => {
+    const nextState = !isSpeakerActive;
+    setIsSpeakerActive(nextState);
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.volume = nextState ? 1.0 : 0.22;
+    }
+    if (partnerVideoRef.current) {
+      partnerVideoRef.current.volume = nextState ? 1.0 : 0.22;
     }
   };
 
@@ -1177,16 +1376,45 @@ export default function App() {
     // We design the ICE candidate queues to persist during initialization to avoid race events
     console.log('[WebRTC] Creating RTCPeerConnection, current candidate queue size:', iceCandidatesQueueRef.current.length);
 
-    // Multi-fallback STUN network servers to handle restricted NAT router configurations
+    // Support custom TURN configurations from env, falling back to community-supported OpenRelay TURN servers
+    const customTurnUrl = import.meta.env.VITE_TURN_URL;
+    const customTurnUser = import.meta.env.VITE_TURN_USERNAME;
+    const customTurnCred = import.meta.env.VITE_TURN_CREDENTIAL;
+
+    const defaultIceServers = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' },
+      { urls: 'stun:global.stun.twilio.com:3478' },
+      {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      }
+    ];
+
+    if (customTurnUrl && customTurnUser && customTurnCred) {
+      defaultIceServers.push({
+        urls: customTurnUrl,
+        username: customTurnUser,
+        credential: customTurnCred
+      });
+    }
+
     const pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
-        { urls: 'stun:global.stun.twilio.com:3478' }
-      ],
+      iceServers: defaultIceServers,
       iceCandidatePoolSize: 10 // Pre-gathers candidates for faster call setup
     });
 
@@ -1774,7 +2002,27 @@ export default function App() {
   }, [activeSection]);
 
   return (
-    <div className={`min-h-screen select-text ${activeSection === 'chat' ? 'h-screen max-h-[100dvh] flex flex-col overflow-hidden pb-16 md:pb-20 bg-stone-50 dark:bg-stone-950' : 'pb-20'}`}>
+    <div 
+      className={`min-h-screen select-text ${
+        activeSection === 'chat' 
+          ? 'fixed inset-0 flex flex-col overflow-hidden bg-stone-50 dark:bg-stone-950' 
+          : 'pb-20'
+      } ${
+        activeSection === 'chat' 
+          ? (isKeyboardOpen ? 'pb-0' : 'pb-16 md:pb-20') 
+          : ''
+      }`}
+      style={activeSection === 'chat' ? { 
+        height: viewportHeight ? `${viewportHeight}px` : '100vh',
+        maxHeight: viewportHeight ? `${viewportHeight}px` : '100vh',
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        overflow: 'hidden'
+      } : {}}
+    >
       
       {/* Visual Navigation Bar */}
       <header className="p-4 bg-white/40 dark:bg-stone-900/40 backdrop-blur-md border-b border-rose-100 dark:border-stone-800 flex items-center justify-between sticky top-0 z-40 select-none">
@@ -1864,7 +2112,7 @@ export default function App() {
       </header>
 
       {/* Modern Responsive Bottom Bar for Lazy Users perspective (1-Click Switchers) */}
-      {currentUser && currentUser.partnerId && (
+      {currentUser && currentUser.partnerId && !isKeyboardOpen && (
         <div className="fixed bottom-0 left-0 right-0 bg-white/90 dark:bg-[#1C1418]/90 backdrop-blur-md border-t border-rose-100/60 dark:border-[#2D2529] py-2 px-4 flex items-center justify-around z-40 shadow-lg select-none sm:max-w-md sm:mx-auto sm:rounded-t-3xl">
           <button
             onClick={() => { navigateToSection('dashboard'); playSweetMessageSound(); }}
@@ -2124,8 +2372,49 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Native Smartphone Notifications Pairing Banner */}
+              <div className="mx-4 mt-3 p-3.5 bg-rose-50/70 dark:bg-rose-950/25 rounded-2xl border border-rose-100/50 dark:border-rose-900/40 flex flex-col gap-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base">📱</span>
+                    <div>
+                      <h4 className="font-bold text-stone-800 dark:text-stone-200 text-[11px] leading-tight">Mobile & Smartphone Push Alerts</h4>
+                      <p className="text-[9px] text-stone-500 dark:text-stone-400 mt-0.5 leading-snug">
+                        Receive instant sound alerts & native display banner popups on your smartphone's notification shade for messages, calls, and updates.
+                      </p>
+                    </div>
+                  </div>
+                  <span className={`text-[8.5px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider select-none shrink-0 ${
+                    notificationPermission === 'granted' 
+                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/45 dark:text-emerald-400' 
+                      : notificationPermission === 'denied' 
+                        ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/45 dark:text-rose-400' 
+                        : 'bg-amber-100 text-amber-800 dark:bg-amber-950/45 dark:text-amber-400'
+                  }`}>
+                    {notificationPermission === 'granted' ? 'Active' : notificationPermission === 'denied' ? 'Blocked' : 'In-App Only'}
+                  </span>
+                </div>
+                
+                {notificationPermission !== 'granted' ? (
+                  <button
+                    onClick={requestNotificationPermission}
+                    className="w-full py-1.5 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-[0.98] cursor-pointer"
+                  >
+                    <span>🔔 Request Smartphone Web Permission</span>
+                  </button>
+                ) : (
+                  <div className="text-[8.5px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                    <span>✓ Mobile push permission authorized! Standby for sweet sounds and popups.</span>
+                  </div>
+                )}
+                
+                <p className="text-[8px] text-stone-400 dark:text-stone-500 italic leading-normal">
+                  💡 Setup Tip: Swipe down on your phone to see push banners. Must launch MuTu in a separate browser tab (not inside standard preview frames) or select "Add to Home Screen" to enable native background alerts!
+                </p>
+              </div>
+
               {/* Notification Items List Container */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-2 max-h-[42vh] min-h-[220px]">
+              <div className="flex-1 overflow-y-auto p-4 space-y-2 max-h-[35vh] min-h-[180px]">
                 {recentNotifications.filter(notif => notifFilter === 'unread' ? !notif.read : true).length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
                     <span className="text-4xl animate-bounce mb-3">🌸</span>
@@ -2359,6 +2648,12 @@ export default function App() {
               <span className="w-2 h-2 bg-rose-500 rounded-full animate-ping"></span>
               <span className="text-xs font-semibold text-rose-400 uppercase tracking-wide">Live {callType} Call</span>
             </div>
+
+            {/* Real-time Call Duration Counter Removed (Replaced with status indicator) */}
+            <div className="bg-stone-900/80 border border-stone-800/80 backdrop-blur-md px-4 py-1.5 rounded-full text-xs font-semibold text-rose-400 flex items-center gap-2">
+              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+              <span>Connected</span>
+            </div>
             
             <div className="bg-stone-900 border border-stone-800 px-3 py-1 rounded-xl text-[9px] text-emerald-400 font-bold">
               🔒 Decrypted client-to-client
@@ -2446,6 +2741,17 @@ export default function App() {
               {micMuted ? <MicOff size={18} /> : <Mic size={18} />}
             </button>
 
+            {/* Loudspeaker toggle */}
+            <button
+              onClick={toggleSpeaker}
+              className={`p-3.5 rounded-full transition-all border ${
+                !isSpeakerActive ? 'bg-amber-600/30 border-amber-600 text-amber-500' : 'bg-stone-900 border-stone-800 hover:bg-stone-800'
+              }`}
+              title={isSpeakerActive ? "Switch to Intercom" : "Switch to Speaker"}
+            >
+              {isSpeakerActive ? <Volume2 size={18} /> : <VolumeX size={18} />}
+            </button>
+
             {/* Hang up dial controller */}
             <button
               onClick={handleHangupCall}
@@ -2464,6 +2770,19 @@ export default function App() {
                 }`}
               >
                 {cameraOff ? <CameraOff size={18} /> : <Camera size={18} />}
+              </button>
+            )}
+
+            {/* Screenshare toggle */}
+            {callType === 'video' && (
+              <button
+                onClick={toggleScreenshare}
+                className={`p-3.5 rounded-full transition-all border ${
+                  isScreensharing ? 'bg-pink-600 border-pink-500 text-white animate-pulse' : 'bg-stone-900 border-stone-800 hover:bg-stone-800'
+                }`}
+                title={isScreensharing ? "Stop Sharing Screen" : "Share Screen"}
+              >
+                <Monitor size={18} />
               </button>
             )}
 

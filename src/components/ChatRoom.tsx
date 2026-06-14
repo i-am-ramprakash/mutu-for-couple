@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ArrowLeft, Send, Sparkles, AlertCircle, Heart, 
   Smile, ShieldCheck, Loader2, Image as ImageIcon, Flame,
-  Mic, Square, Play, Pause, Trash2, Upload, ZoomIn, X, Reply
+  Mic, Square, Play, Pause, Trash2, Upload, ZoomIn, X, Reply,
+  Video, VolumeX, Volume2
 } from 'lucide-react';
 import { User, Message, MessageReaction } from '../types';
 import { encryptMessage, decryptMessage } from '../crypto';
@@ -111,6 +112,93 @@ const VoiceNotePlayer = ({ base64Audio }: { base64Audio: string }) => {
   );
 };
 
+// Sub-component to render base64 Video Note circles
+const VideoNotePlayer = ({ base64Video }: { base64Video: string }) => {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  const videoUrl = useMemo(() => {
+    return `data:video/webm;base64,${base64Video}`;
+  }, [base64Video]);
+
+  const togglePlay = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!videoRef.current) return;
+    if (isPlaying) {
+      videoRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      videoRef.current.play().then(() => {
+        setIsPlaying(true);
+      }).catch(err => {
+        console.warn('Video note playback errored:', err);
+      });
+    }
+  };
+
+  const toggleMuted = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!videoRef.current) return;
+    videoRef.current.muted = !isMuted;
+    setIsMuted(!isMuted);
+  };
+
+  return (
+    <div 
+      className="relative w-40 h-40 rounded-full overflow-hidden border-2 border-pink-100 dark:border-stone-800 group shadow-lg bg-black flex items-center justify-center cursor-pointer select-none"
+      onClick={() => togglePlay()}
+    >
+      <video
+        ref={videoRef}
+        src={videoUrl}
+        className="w-full h-full object-cover rounded-full"
+        loop
+        playsInline
+        muted={isMuted}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+      />
+
+      {/* Control buttons overlay */}
+      <div className="absolute inset-0 bg-stone-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+        <button 
+          onClick={togglePlay}
+          type="button"
+          className="p-1.5 bg-white/20 hover:bg-white/40 text-white rounded-full transition"
+        >
+          {isPlaying ? <Pause size={12} className="fill-white" /> : <Play size={12} className="ml-0.5 fill-white" />}
+        </button>
+        <button 
+          onClick={toggleMuted}
+          type="button"
+          className="p-1.5 bg-white/20 hover:bg-white/40 text-white rounded-full transition"
+        >
+          {isMuted ? <VolumeX size={12} /> : <Volume2 size={12} />}
+        </button>
+      </div>
+
+      {!isPlaying && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/10">
+          <div className="w-10 h-10 rounded-full bg-pink-500/80 text-white flex items-center justify-center animate-pulse">
+            <Play size={16} fill="currentColor" className="ml-0.5 text-white" />
+          </div>
+        </div>
+      )}
+
+      {/* Muted toggle mini state pill indicators */}
+      <button 
+        onClick={toggleMuted}
+        type="button"
+        className="absolute bottom-1.5 right-1/2 translate-x-1/2 px-2 py-0.5 bg-black/60 hover:bg-black/80 text-[8px] font-bold text-white rounded-full flex items-center gap-1 transition-all z-10"
+      >
+        {isMuted ? <VolumeX size={8} /> : <Volume2 size={8} />}
+        <span>{isMuted ? 'Muted' : 'Sound'}</span>
+      </button>
+    </div>
+  );
+};
+
 // Helper to check if a string is a valid image source (base64, URL, or icon URL) vs. a text emoji
 const isImageString = (src: string | undefined | null): boolean => {
   if (!src) return false;
@@ -158,6 +246,15 @@ export default function ChatRoom({
   const touchStartXRef = useRef<number | null>(null);
   const activeSwipeMsgIdRef = useRef<string | null>(null);
   const isRecordingCancelledRef = useRef(false);
+
+  // Video note states
+  const [isVideoRecording, setIsVideoRecording] = useState(false);
+  const [videoRecordingSeconds, setVideoRecordingSeconds] = useState(0);
+  const [videoRecorder, setVideoRecorder] = useState<MediaRecorder | null>(null);
+  const [videoStream, setVideoStream] = useState<MediaStream | null>(null);
+  const videoChunksRef = useRef<Blob[]>([]);
+  const videoRecordTimerRef = useRef<any>(null);
+  const localVideoPreviewRef = useRef<HTMLVideoElement | null>(null);
 
   // Touch Portal states
   const [showThumbKissPortal, setShowThumbKissPortal] = useState(false);
@@ -302,6 +399,92 @@ export default function ChatRoom({
     }
   };
 
+  // Video Note Recording handlers
+  const startVideoRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { width: 320, height: 320, facingMode: 'user' }, 
+        audio: true 
+      });
+      setVideoStream(stream);
+      setIsVideoRecording(true);
+      setVideoRecordingSeconds(0);
+      videoChunksRef.current = [];
+
+      // Render live preview container
+      setTimeout(() => {
+        if (localVideoPreviewRef.current) {
+          localVideoPreviewRef.current.srcObject = stream;
+        }
+      }, 100);
+
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          videoChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(track => track.stop());
+        setVideoStream(null);
+
+        if (videoChunksRef.current.length === 0) return;
+
+        const videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
+        const reader = new FileReader();
+        reader.readAsDataURL(videoBlob);
+        reader.onloadend = async () => {
+          const base64data = (reader.result as string).split(',')[1];
+          if (!base64data) return;
+
+          setIsEncrypting(true);
+          try {
+            const videoUrl = `[VIDEO_NOTE]:${base64data}`;
+            const pld = await encryptMessage(videoUrl, user.loveKey || '');
+            onSendMessage({ textEncrypted: pld.ciphertext, iv: pld.iv });
+          } catch (err) {
+            console.error('Video message encryption failed:', err);
+          } finally {
+            setIsEncrypting(false);
+          }
+        };
+      };
+
+      recorder.start();
+      setVideoRecorder(recorder);
+
+      if (videoRecordTimerRef.current) clearInterval(videoRecordTimerRef.current);
+      videoRecordTimerRef.current = setInterval(() => {
+        setVideoRecordingSeconds(prev => prev + 1);
+      }, 1000);
+
+    } catch (err) {
+      console.warn('Camera/Mic permission details:', err);
+      alert('Could not record video. Ensure camera & microphone services are allowed.');
+    }
+  };
+
+  const cancelVideoRecording = () => {
+    if (videoRecorder && videoRecorder.state !== 'inactive') {
+      videoChunksRef.current = [];
+      videoRecorder.stop();
+    } else if (videoStream) {
+      videoStream.getTracks().forEach(t => t.stop());
+      setVideoStream(null);
+    }
+    setIsVideoRecording(false);
+    if (videoRecordTimerRef.current) clearInterval(videoRecordTimerRef.current);
+  };
+
+  const stopVideoRecording = () => {
+    if (videoRecorder && videoRecorder.state !== 'inactive') {
+      videoRecorder.stop();
+    }
+    setIsVideoRecording(false);
+    if (videoRecordTimerRef.current) clearInterval(videoRecordTimerRef.current);
+  };
+
   // Safe client side picture compressor using standard HTML Canvas
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -311,8 +494,8 @@ export default function ChatRoom({
     reader.onload = (event) => {
       const img = new Image();
       img.onload = () => {
-        // Build sizing constraints privately keeping images under 400px width/height for fast Private
-        const maxResolution = 450;
+        // Build sizing constraints privately keeping images at gorgeous 720p resolution
+        const maxResolution = 1280;
         let width = img.width;
         let height = img.height;
 
@@ -334,7 +517,7 @@ export default function ChatRoom({
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.drawImage(img, 0, 0, width, height);
-          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.82);
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.90);
           sendEncryptedImage(compressedBase64);
         }
       };
@@ -362,6 +545,7 @@ export default function ChatRoom({
   useEffect(() => {
     return () => {
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      if (videoRecordTimerRef.current) clearInterval(videoRecordTimerRef.current);
     };
   }, []);
 
@@ -417,6 +601,8 @@ export default function ChatRoom({
         if (decryptedReplied) {
           if (decryptedReplied.startsWith('[VOICE_NOTE]:')) {
             replyToText = '🎤 Voice Note';
+          } else if (decryptedReplied.startsWith('[VIDEO_NOTE]:')) {
+            replyToText = '📹 Video Note';
           } else if (decryptedReplied.startsWith('[IMAGE_ATTACHMENT]:')) {
             replyToText = '📸 Shared Image';
           } else if (decryptedReplied.startsWith('[GIF]:')) {
@@ -588,7 +774,7 @@ export default function ChatRoom({
         <span className="text-[10px] text-emerald-500 font-bold flex items-center gap-1 relative pl-3.5 pr-2">
           <span className="w-2.5 h-2.5 bg-emerald-500/30 rounded-full animate-ping absolute left-0" />
           <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full absolute left-0.5" />
-          <span>Beloved online • {formatChronometer(activeSeconds || 1)}</span>
+          <span>Beloved online</span>
         </span>
       );
     }
@@ -781,6 +967,8 @@ export default function ChatRoom({
                           </div>
                         ) : decryptedVal.startsWith('[VOICE_NOTE]:') ? (
                           <VoiceNotePlayer base64Audio={decryptedVal.replace('[VOICE_NOTE]:', '')} />
+                        ) : decryptedVal.startsWith('[VIDEO_NOTE]:') ? (
+                          <VideoNotePlayer base64Video={decryptedVal.replace('[VIDEO_NOTE]:', '')} />
                         ) : (
                           <p className="break-words whitespace-pre-wrap">{decryptedVal}</p>
                         )
@@ -922,7 +1110,7 @@ export default function ChatRoom({
                 Replying to {replyingTo.senderId === user.id ? 'Yourself' : user.partnerName || 'Partner'}
               </span>
               <p className="text-stone-600 dark:text-stone-300 truncate text-[11px] mt-0.5 font-medium">
-                {decryptedCache[replyingTo.id]?.startsWith('[VOICE_NOTE]:') ? '🎤 Voice Note' : decryptedCache[replyingTo.id]?.startsWith('[IMAGE_ATTACHMENT]:') ? '📸 Shared Image' : decryptedCache[replyingTo.id]?.startsWith('[GIF]:') ? '💖 Romantic Sticker' : decryptedCache[replyingTo.id]}
+                {decryptedCache[replyingTo.id]?.startsWith('[VOICE_NOTE]:') ? '🎤 Voice Note' : decryptedCache[replyingTo.id]?.startsWith('[VIDEO_NOTE]:') ? '📹 Video Note' : decryptedCache[replyingTo.id]?.startsWith('[IMAGE_ATTACHMENT]:') ? '📸 Shared Image' : decryptedCache[replyingTo.id]?.startsWith('[GIF]:') ? '💖 Romantic Sticker' : decryptedCache[replyingTo.id]}
               </p>
             </div>
             <button 
@@ -934,7 +1122,43 @@ export default function ChatRoom({
           </div>
         )}
 
-        {isRecording ? (
+        {isVideoRecording ? (
+          <div className="flex flex-col items-center justify-center bg-rose-50/40 dark:bg-stone-900 border border-rose-100 dark:border-stone-800 p-4 rounded-2xl gap-3 shadow-md">
+            <span className="text-xs font-bold text-rose-500 animate-pulse uppercase tracking-wider flex items-center gap-1.5">
+              <span className="w-2 h-2 bg-rose-500 rounded-full animate-ping"></span>
+              Video Note Rec: {Math.floor(videoRecordingSeconds / 60)}:{(videoRecordingSeconds % 60) < 10 ? '0' : ''}{videoRecordingSeconds % 60}
+            </span>
+            
+            {/* Round Webcam live preview */}
+            <div className="w-32 h-32 rounded-full overflow-hidden border-2 border-rose-400 shadow-inner bg-black">
+              <video
+                ref={localVideoPreviewRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover transform -scale-x-100"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={cancelVideoRecording}
+                className="py-1.5 px-3 bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-700 rounded-xl transition font-semibold text-[10px] cursor-pointer"
+              >
+                Cancel Video
+              </button>
+              <button
+                type="button"
+                onClick={stopVideoRecording}
+                className="py-1.5 px-4 bg-rose-500 text-white hover:bg-rose-600 rounded-xl transition font-bold text-[10px] flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
+              >
+                <Square size={8} className="fill-white" />
+                <span>Send Video Note</span>
+              </button>
+            </div>
+          </div>
+        ) : isRecording ? (
           <div className="flex items-center justify-between bg-rose-50/50 border border-rose-100 p-2 rounded-2xl animate-pulse">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 bg-rose-500 rounded-full animate-ping"></span>
@@ -1008,6 +1232,17 @@ export default function ChatRoom({
               id="chat_mic_record_btn"
             >
               <Mic size={18} />
+            </button>
+
+            {/* Video note recorder */}
+            <button
+              type="button"
+              onClick={startVideoRecording}
+              className="p-2 text-stone-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
+              title="Record Video Note"
+              id="chat_video_record_btn"
+            >
+              <Video size={18} />
             </button>
 
             {/* Thumb Kiss Trigger Button */}
