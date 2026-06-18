@@ -243,6 +243,7 @@ export default function ChatRoom({
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollBottomBadge, setShowScrollBottomBadge] = useState(false);
   const [lastMessageId, setLastMessageId] = useState<string>('');
+  const isInitialMountRef = useRef(true);
   const typingTimeoutRef = useRef<any>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
@@ -575,17 +576,24 @@ export default function ChatRoom({
     const el = messagesContainerRef.current;
 
     if (el) {
-      const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 200;
-      if (isMyMessage || isAtBottom) {
-        setTimeout(() => {
-          if (el) {
-            el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-          }
-        }, 100);
+      if (isInitialMountRef.current) {
+        // Scroll instantly without slow smooth-scroll transition on mount (Issue 7)
+        el.scrollTo({ top: el.scrollHeight });
+        isInitialMountRef.current = false;
         setShowScrollBottomBadge(false);
       } else {
-        if (lastMsg.id !== lastMessageId) {
-          setShowScrollBottomBadge(true);
+        const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 200;
+        if (isMyMessage || isAtBottom) {
+          setTimeout(() => {
+            if (el) {
+              el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+            }
+          }, 100);
+          setShowScrollBottomBadge(false);
+        } else {
+          if (lastMsg.id !== lastMessageId) {
+            setShowScrollBottomBadge(true);
+          }
         }
       }
     }
@@ -769,7 +777,10 @@ export default function ChatRoom({
       setTimeout(() => {
         const el = messagesContainerRef.current;
         if (el) {
-          el.scrollTo({ top: el.scrollHeight });
+          const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 300;
+          if (isAtBottom) {
+            el.scrollTo({ top: el.scrollHeight });
+          }
         }
       }, 100);
     };
@@ -777,14 +788,12 @@ export default function ChatRoom({
     const vv = window.visualViewport;
     if (vv) {
       vv.addEventListener('resize', handleResize);
-      vv.addEventListener('scroll', handleResize);
     }
     window.addEventListener('resize', handleResize);
 
     return () => {
       if (vv) {
         vv.removeEventListener('resize', handleResize);
-        vv.removeEventListener('scroll', handleResize);
       }
       window.removeEventListener('resize', handleResize);
     };
@@ -964,7 +973,7 @@ export default function ChatRoom({
       )}
 
       {/* Messages area */}
-      <div className="flex-1 min-h-0 flex flex-col relative bg-stone-50/25">
+      <div className="flex-1 min-h-0 flex flex-col relative bg-stone-50/10 dark:bg-stone-950/20">
         <div 
           ref={messagesContainerRef}
           onScroll={handleScroll}
@@ -980,7 +989,7 @@ export default function ChatRoom({
             </p>
           </div>
         ) : (
-          messages.map((msg) => {
+          messages.map((msg, index) => {
             const isMe = msg.senderId === user.id;
             const decryptedVal = decryptedCache[msg.id];
             const hasGif = decryptedVal && decryptedVal.startsWith('[GIF]:');
@@ -988,11 +997,26 @@ export default function ChatRoom({
             const hasImg = decryptedVal && decryptedVal.startsWith('[IMAGE_ATTACHMENT]:');
             const base64ImgSrc = hasImg ? decryptedVal.replace('[IMAGE_ATTACHMENT]:', '') : '';
 
+            // Dynamic date grouping to display separators while scrolling the chat (Issue 5)
+            const currentMsgDate = new Date(msg.timestamp).toDateString();
+            const prevMsgDate = index > 0 ? new Date(messages[index - 1].timestamp).toDateString() : null;
+            const showDateHeader = currentMsgDate !== prevMsgDate;
+
             return (
-              <div 
-                key={msg.id}
-                className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group max-w-full`}
-              >
+              <React.Fragment key={msg.id}>
+                {showDateHeader && (
+                  <div className="flex justify-center my-3 select-none w-full animate-fade-in">
+                    <span className="bg-stone-200/50 dark:bg-stone-800/60 border border-stone-200/10 text-stone-500 dark:text-stone-300 text-[8.5px] font-mono tracking-wider font-bold uppercase px-2.5 py-1 rounded-full shadow-4xs">
+                      {currentMsgDate === new Date().toDateString() ? 'Today' : 
+                       currentMsgDate === new Date(Date.now() - 86400000).toDateString() ? 'Yesterday' :
+                       new Date(msg.timestamp).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' })}
+                    </span>
+                  </div>
+                )}
+                
+                <div 
+                  className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group max-w-full`}
+                >
                 {/* Message Bubble container */}
                 <div className="flex items-start gap-1.5 max-w-[85%] relative">
                   
@@ -1082,7 +1106,7 @@ export default function ChatRoom({
 
                       {/* Msg reactions drawer */}
                       {msg.reactions && msg.reactions.length > 0 && (
-                        <div className="absolute -bottom-2 -right-1.5 flex gap-0.5 bg-white border border-rose-100 px-1 py-0.5 rounded-full shadow-sm max-w-full overflow-hidden">
+                        <div className="absolute -bottom-2 -right-1.5 flex gap-0.5 bg-white dark:bg-stone-800 border border-rose-100 dark:border-stone-700 px-1 py-0.5 rounded-full shadow-sm max-w-full overflow-hidden">
                           {msg.reactions.map((react, rIdx) => (
                             <span 
                               key={rIdx} 
@@ -1103,7 +1127,7 @@ export default function ChatRoom({
                           initial={{ opacity: 0, scale: 0.8, y: 5 }}
                           animate={{ opacity: 1, scale: 1, y: 0 }}
                           exit={{ opacity: 0, scale: 0.8, y: 5 }}
-                          className={`absolute -top-10 ${isMe ? 'right-0' : 'left-4'} bg-white border border-rose-100 px-2 py-1 rounded-full shadow-md flex gap-1.5 z-40`}
+                          className={`absolute -top-10 ${isMe ? 'right-0' : 'left-4'} bg-white dark:bg-stone-800 border border-rose-100 dark:border-stone-700 px-2 py-1 rounded-full shadow-md flex gap-1.5 z-40`}
                         >
                           {reactionEmojis.map((emoji) => (
                             <button
@@ -1148,8 +1172,9 @@ export default function ChatRoom({
                   )}
                 </div>
               </div>
-            );
-          })
+            </React.Fragment>
+          );
+        })
         )}
 
         {typingPartner && (
@@ -1211,7 +1236,7 @@ export default function ChatRoom({
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: '140px' }}
             exit={{ opacity: 0, height: 0 }}
-            className="bg-white border-t border-rose-100 p-3 overflow-y-auto z-10"
+            className="bg-white dark:bg-stone-900 border-t border-rose-100 dark:border-stone-850 p-3 overflow-y-auto z-10"
             id="gif_drawer"
           >
             <div className="flex items-center justify-between mb-2">

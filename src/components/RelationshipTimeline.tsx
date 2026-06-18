@@ -55,6 +55,7 @@ export default function RelationshipTimeline({ user, onBack }: RelationshipTimel
           title,
           description,
           eventDate,
+          date: eventDate,
           category
         })
       });
@@ -258,7 +259,7 @@ export default function RelationshipTimeline({ user, onBack }: RelationshipTimel
                       {evt.title}
                     </h4>
                     <span className="text-[10px] font-bold text-stone-400 font-mono flex items-center gap-1">
-                      <Calendar size={11} /> {formatDateFriendly(evt.eventDate)}
+                      <Calendar size={11} /> {formatDateFriendly(evt.eventDate || evt.date || '')}
                     </span>
                   </div>
                   {evt.description && (

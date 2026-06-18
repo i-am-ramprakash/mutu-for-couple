@@ -9,7 +9,7 @@ import {
 
 import { 
   User, Message, Memory, CalendarEvent, DailyQuestion, 
-  DailyAnswer, JournalEntry, MovieState, WSEvent, BucketItem 
+  DailyAnswer, JournalEntry, MovieState, WSEvent, BucketItem, MessageReaction
 } from './types';
 
 import { 
@@ -39,7 +39,7 @@ import UserProfile from './components/UserProfile';
 import CallDiagnostics from './components/CallDiagnostics';
 import { useTheme } from './ThemeContext';
 import { db } from './lib/firebase';
-import { collection, query, where, onSnapshot, doc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, setDoc, updateDoc } from 'firebase/firestore';
 
 const isImageString = (src: string | undefined | null): boolean => {
   if (!src) return false;
@@ -1098,6 +1098,9 @@ export default function App() {
                 sleepTime: partnerData.sleepTime || prev.sleepTime,
                 workSchedule: partnerData.workSchedule || prev.workSchedule,
                 bestTimeToCall: partnerData.bestTimeToCall || prev.bestTimeToCall,
+                partnerCity: partnerData.locationCity || prev.partnerCity,
+                partnerWeather: partnerData.locationWeather || prev.partnerWeather,
+                partnerTimezone: partnerData.locationTimezone || prev.partnerTimezone,
               };
             });
           }
@@ -1171,19 +1174,35 @@ export default function App() {
   };
 
   // 3. Messaging Callbacks
-  const dispatchWebSocketMessage = (msg: Message) => {
+  const dispatchWebSocketMessage = async (msg: Message) => {
+    let wsDelivered = false;
     try {
       if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
         socketRef.current.send(JSON.stringify({
           type: 'chat:message',
           message: msg
         }));
-      } else {
-        throw new Error('WebSocket is offline.');
+        wsDelivered = true;
       }
     } catch (err) {
-      console.error('Failed to dispatch secure Private message, saving offline failed state:', err);
-      // Mark failed state locally on this message
+      console.warn('[WebRTC/WS] WebSocket message dispatch failed, using Firestore direct backup:', err);
+    }
+
+    // Direct Firestore backup to guarantee absolute delivery (PWAs / background networks / cold starts)
+    try {
+      const docRef = doc(db, 'messages', msg.id);
+      const messageToSave = {
+        ...msg,
+        status: wsDelivered ? msg.status : 'sent'
+      };
+      await setDoc(docRef, messageToSave);
+      
+      // If sent using backup, immediately set local state status to 'sent'
+      if (!wsDelivered) {
+        setMessages((prev) => prev.map(m => m.id === msg.id ? { ...m, status: 'sent' } : m));
+      }
+    } catch (fsErr) {
+      console.error('[WebRTC/FS] Combined fallback direct save to Firestore also failed:', fsErr);
       setMessages((prev) => prev.map(m => m.id === msg.id ? { ...m, status: 'failed' } : m));
     }
   };
@@ -1218,10 +1237,11 @@ export default function App() {
     dispatchWebSocketMessage({ ...msg, status: 'sending' });
   };
 
-  const handleSendReaction = (messageId: string, emoji: string, action: 'add' | 'remove') => {
-    if (!currentUser || !socketRef.current) return;
+  const handleSendReaction = async (messageId: string, emoji: string, action: 'add' | 'remove') => {
+    if (!currentUser) return;
 
     const reaction = { emoji, userId: currentUser.id };
+    let newReactionsList: MessageReaction[] = [];
     
     // Inject locally first
     setMessages((prev) => prev.map(m => {
@@ -1233,18 +1253,35 @@ export default function App() {
         } else {
           reactions = reactions.filter(r => r.userId !== currentUser.id);
         }
+        newReactionsList = reactions;
         return { ...m, reactions };
       }
       return m;
     }));
 
-    // Broadcast over WS
-    socketRef.current.send(JSON.stringify({
-      type: 'chat:reaction',
-      messageId,
-      reaction,
-      action
-    }));
+    // Broadcast over WS if connected
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'chat:reaction',
+        messageId,
+        reaction,
+        action
+      }));
+    }
+
+    // Direct Firestore update to persist reaction
+    try {
+      const docRef = doc(db, 'messages', messageId);
+      await updateDoc(docRef, { reactions: newReactionsList });
+    } catch (err) {
+      console.warn('[WebRTC/FS] Failed to run updateDoc on reaction, trying setDoc merge instead:', err);
+      try {
+        const docRef = doc(db, 'messages', messageId);
+        await setDoc(docRef, { reactions: newReactionsList }, { merge: true });
+      } catch (e) {
+        console.error('[WebRTC/FS] Direct reactions sync failed:', e);
+      }
+    }
   };
 
   const handleSendTyping = (isTyping: boolean) => {

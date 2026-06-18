@@ -82,7 +82,7 @@ export default function UserProfile({ currentUser, profileUserId, onBack, onRefr
   // Load profile data on mount or user change
   useEffect(() => {
     fetchProfile();
-  }, [profileUserId, currentUser]);
+  }, [profileUserId]);
 
   // Handle live ticker logic
   useEffect(() => {
@@ -114,7 +114,9 @@ export default function UserProfile({ currentUser, profileUserId, onBack, onRefr
 
   const fetchProfile = async () => {
     try {
-      setLoading(true);
+      if (!profileData || profileData.id !== profileUserId) {
+        setLoading(true);
+      }
       const res = await fetch(`/api/user/profile/${profileUserId}`);
       if (!res.ok) throw new Error('Failed to fetch profile info.');
       const d = await res.json();
@@ -256,7 +258,7 @@ export default function UserProfile({ currentUser, profileUserId, onBack, onRefr
     };
   }, []);
 
-  if (loading) {
+  if (loading && !profileData) {
     return (
       <div className="min-h-screen bg-stone-950 flex flex-col items-center justify-center text-center p-6 space-y-4">
         <motion.div 

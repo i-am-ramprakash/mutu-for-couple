@@ -1663,8 +1663,9 @@ app.get('/api/couple/timeline', async (req, res) => {
 
 // Custom timeline entry
 app.post('/api/couple/timeline', async (req, res) => {
-  const { coupleId, milestoneType, title, description, date } = req.body;
-  if (!coupleId || !title || !date) {
+  const { coupleId, milestoneType, title, description, date, eventDate, category } = req.body;
+  const finalDate = date || eventDate;
+  if (!coupleId || !title || !finalDate) {
     return res.status(400).json({ error: 'Missing milestone parameters' });
   }
 
@@ -1672,11 +1673,13 @@ app.post('/api/couple/timeline', async (req, res) => {
   const newEv: TimelineEvent = {
     id: 'time_cust_' + Math.random().toString(36).substring(2, 11),
     coupleId,
-    milestoneType: milestoneType || 'first_visit',
+    milestoneType: milestoneType || 'custom',
+    category: category || 'custom',
     title,
     description: description || 'A beautiful customized memory milestone added together!',
-    date,
-    timestamp: new Date(date).getTime()
+    date: finalDate,
+    eventDate: finalDate,
+    timestamp: new Date(finalDate).getTime()
   };
 
   db.timelineEvents.push(newEv);
