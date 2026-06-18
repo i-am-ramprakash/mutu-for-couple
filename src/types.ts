@@ -51,6 +51,30 @@ export interface User {
   partnerStreakCurrent?: number;
   partnerLastActiveTime?: number; // Epoch timestamp representing when they were last active/online
   partnerOnline?: boolean; // Live websocket connection status
+
+  // Dedicated Rich Profile Fields
+  coverPhoto?: string;
+  coverRepositionY?: number;
+  nickname?: string;
+  personalNote?: string;
+  favFood?: string;
+  favMovie?: string;
+  favSong?: string;
+  favColor?: string;
+  dreamDestination?: string;
+  reunionDate?: string;
+  distance?: string;
+  wakeTime?: string;
+  sleepTime?: string;
+  workSchedule?: string;
+  bestTimeToCall?: string;
+  favPhoto?: string;
+  favVoiceNoteText?: string;
+  favLetterTitle?: string;
+  favMemoryText?: string;
+  sharedGoals?: string;
+  plannedTrips?: string;
+  lifeMilestones?: string;
 }
 
 export interface LockedLetter {

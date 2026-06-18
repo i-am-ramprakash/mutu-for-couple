@@ -422,7 +422,15 @@ export default function HomeDashboard({
           <div className="flex items-center justify-center gap-6 relative">
             {/* User */}
             <div className="flex flex-col items-center">
-              <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-rose-100 to-rose-200 border-2 border-white romantic-glow shadow flex items-center justify-center text-3xl overflow-hidden relative">
+              <div 
+                onClick={() => {
+                  if (typeof window !== 'undefined' && (window as any).navigateToProfile) {
+                    (window as any).navigateToProfile(user.id);
+                  }
+                }}
+                className="w-16 h-16 rounded-full bg-gradient-to-tr from-rose-100 to-rose-200 border-2 border-white romantic-glow shadow flex items-center justify-center text-3xl overflow-hidden relative cursor-pointer hover:scale-110 active:scale-95 transition-all"
+                title={`${user.name}'s profile room`}
+              >
                 {isImageString(user.profilePhoto) ? (
                   <img src={user.profilePhoto} alt={user.name} className="w-full h-full object-cover" />
                 ) : (
@@ -462,7 +470,15 @@ export default function HomeDashboard({
 
             {/* Partner */}
             <div className="flex flex-col items-center">
-              <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-pink-100 to-pink-200 border-2 border-white romantic-glow shadow flex items-center justify-center text-3xl overflow-hidden relative">
+              <div 
+                onClick={() => {
+                  if (typeof window !== 'undefined' && (window as any).navigateToProfile && user.partnerId) {
+                    (window as any).navigateToProfile(user.partnerId);
+                  }
+                }}
+                className="w-16 h-16 rounded-full bg-gradient-to-tr from-pink-100 to-pink-200 border-2 border-white romantic-glow shadow flex items-center justify-center text-3xl overflow-hidden relative cursor-pointer hover:scale-110 active:scale-95 transition-all"
+                title={`${user.partnerName || 'Companion'}'s profile room`}
+              >
                 {isImageString(user.partnerPhoto) ? (
                   <img src={user.partnerPhoto} alt={user.partnerName} className="w-full h-full object-cover" />
                 ) : (

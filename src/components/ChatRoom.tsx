@@ -4,7 +4,7 @@ import {
   ArrowLeft, Send, Sparkles, AlertCircle, Heart, 
   Smile, ShieldCheck, Loader2, Image as ImageIcon, Flame,
   Mic, Square, Play, Pause, Trash2, Upload, ZoomIn, X, Reply,
-  Video, VolumeX, Volume2
+  Video, VolumeX, Volume2, Phone
 } from 'lucide-react';
 import { User, Message, MessageReaction } from '../types';
 import { encryptMessage, decryptMessage } from '../crypto';
@@ -23,6 +23,8 @@ interface ChatRoomProps {
   onJoin?: () => void;
   onLeave?: () => void;
   onRetryMessage?: (msg: Message) => void;
+  onVoiceCall?: () => void;
+  onVideoCall?: () => void;
 }
 
 // Sub-component to stream decrypted Private base64 audio voice note attachments safely
@@ -222,7 +224,8 @@ const ROMANTIC_GIFS = [
 
 export default function ChatRoom({ 
   user, onBack, messages, onSendMessage, onSendReaction, typingPartner, onTyping,
-  partnerThumbKissActive = false, onSendThumbKissToggle, onJoin, onLeave, onRetryMessage
+  partnerThumbKissActive = false, onSendThumbKissToggle, onJoin, onLeave, onRetryMessage,
+  onVoiceCall, onVideoCall
 }: ChatRoomProps) {
   useEffect(() => {
     if (onJoin) onJoin();
@@ -237,6 +240,9 @@ export default function ChatRoom({
   const [showGifDrawer, setShowGifDrawer] = useState(false);
   const [decryptedCache, setDecryptedCache] = useState<Record<string, string>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const [showScrollBottomBadge, setShowScrollBottomBadge] = useState(false);
+  const [lastMessageId, setLastMessageId] = useState<string>('');
   const typingTimeoutRef = useRef<any>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
@@ -552,14 +558,56 @@ export default function ChatRoom({
   // Quick select reaction list
   const reactionEmojis = ['❤️', '🥰', '😘', '💋', '🌹', '🤗', '🔥', '👑'];
 
-  // Scroll to bottom helper
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const handleScroll = () => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 200;
+    if (isAtBottom) {
+      setShowScrollBottomBadge(false);
+    }
   };
 
+  // WhatsApp-style message arrival behavior
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, typingPartner]);
+    if (messages.length === 0) return;
+    const lastMsg = messages[messages.length - 1];
+    const isMyMessage = lastMsg.senderId === user.id;
+    const el = messagesContainerRef.current;
+
+    if (el) {
+      const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 200;
+      if (isMyMessage || isAtBottom) {
+        setTimeout(() => {
+          if (el) {
+            el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+          }
+        }, 100);
+        setShowScrollBottomBadge(false);
+      } else {
+        if (lastMsg.id !== lastMessageId) {
+          setShowScrollBottomBadge(true);
+        }
+      }
+    }
+    setLastMessageId(lastMsg.id);
+  }, [messages, user.id, lastMessageId]);
+
+  // Adjust scroll when partner is typing to accommodate the bubble
+  useEffect(() => {
+    if (typingPartner) {
+      const el = messagesContainerRef.current;
+      if (el) {
+        const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 200;
+        if (isAtBottom) {
+          setTimeout(() => {
+            if (el) {
+              el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+            }
+          }, 100);
+        }
+      }
+    }
+  }, [typingPartner]);
 
   // Decrypt incoming private messages and cache them
   useEffect(() => {
@@ -718,7 +766,12 @@ export default function ChatRoom({
     if (typeof window === 'undefined') return;
     
     const handleResize = () => {
-      setTimeout(scrollToBottom, 100);
+      setTimeout(() => {
+        const el = messagesContainerRef.current;
+        if (el) {
+          el.scrollTo({ top: el.scrollHeight });
+        }
+      }, 100);
     };
 
     const vv = window.visualViewport;
@@ -833,26 +886,36 @@ export default function ChatRoom({
     >
       
       {/* Header section */}
-      <div className="p-4 bg-white/90 dark:bg-stone-900/90 border-b border-rose-100 dark:border-stone-800 flex items-center justify-between z-10">
-        <div className="flex items-center gap-3">
+      <div className="p-3 bg-white/90 dark:bg-stone-900/90 border-b border-rose-100 dark:border-stone-800 flex items-center justify-between z-10 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
           <button 
             onClick={onBack}
-            className="p-1.5 hover:bg-rose-50 text-stone-500 rounded-xl transition-all"
+            className="p-1.5 hover:bg-rose-50 dark:hover:bg-stone-800 text-stone-500 dark:text-stone-300 rounded-xl transition-all shrink-0"
             id="chat_back_btn"
           >
             <ArrowLeft size={18} />
           </button>
           
-          <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-full bg-rose-100 flex items-center justify-center text-lg">
+          <div className="flex items-center gap-2 min-w-0">
+            <div 
+              onClick={() => {
+                if (typeof window !== 'undefined' && (window as any).navigateToProfile && user.partnerId) {
+                  (window as any).navigateToProfile(user.partnerId);
+                }
+              }}
+              className="w-9 h-9 rounded-full bg-rose-100 dark:bg-stone-800 flex items-center justify-center text-lg shrink-0 cursor-pointer hover:scale-110 active:scale-95 transition-all"
+              title={`${user.partnerName || 'Companion'}'s profile room`}
+            >
               {isImageString(user.partnerPhoto) ? (
                 <img src={user.partnerPhoto} alt={user.partnerName} className="w-full h-full object-cover rounded-full" />
               ) : (
                 <span>{user.partnerPhoto || '🦊'}</span>
               )}
             </div>
-            <div>
-              <h3 className="font-bold text-xs text-stone-700 dark:text-stone-300 leading-none truncate max-w-[120px] md:max-w-[180px]" title={user.partnerName || 'Partner'}>{user.partnerName || 'Partner'}</h3>
+            <div className="min-w-0">
+              <h3 className="font-bold text-xs text-stone-700 dark:text-stone-300 leading-none truncate max-w-[100px] sm:max-w-[150px] md:max-w-[200px]" title={user.partnerName || 'Partner'}>
+                {user.partnerName || 'Partner'}
+              </h3>
               <div className="mt-0.5 flex items-center min-h-[14px]">
                 {getPartnerStatusLabel()}
               </div>
@@ -860,10 +923,36 @@ export default function ChatRoom({
           </div>
         </div>
 
-        {/* Private Indicator */}
-        <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-xl text-[10px] text-rose-600 font-semibold shadow-inner">
-          <Heart size={12} className="text-rose-500" fill="currentColor" />
-          <span>Just for you two</span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Quick Speak voice-dial button */}
+          {onVoiceCall && (
+            <button
+              onClick={onVoiceCall}
+              className="p-2 border border-rose-100 dark:border-stone-800 hover:bg-rose-50 dark:hover:bg-stone-800 text-rose-500 rounded-xl transition-all cursor-pointer bg-white dark:bg-stone-900"
+              title="Voice Call"
+              id="chat_header_voice_dial"
+            >
+              <Phone size={14} />
+            </button>
+          )}
+
+          {/* Quick Live video-dial button */}
+          {onVideoCall && (
+            <button
+              onClick={onVideoCall}
+              className="p-2 bg-rose-500 hover:bg-rose-600 text-white rounded-xl transition-all flex items-center justify-center cursor-pointer shadow-xs active:scale-95"
+              title="Video Call"
+              id="chat_header_video_dial"
+            >
+              <Video size={14} />
+            </button>
+          )}
+
+          {/* Private Indicator - Hidden on mobile screen spaces */}
+          <div className="hidden sm:flex items-center gap-1.5 bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-xl text-[10px] text-rose-600 font-semibold shadow-inner">
+            <Heart size={12} className="text-rose-500" fill="currentColor" />
+            <span>Just for you two</span>
+          </div>
         </div>
       </div>
 
@@ -875,7 +964,12 @@ export default function ChatRoom({
       )}
 
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 select-none">
+      <div className="flex-1 min-h-0 flex flex-col relative bg-stone-50/25">
+        <div 
+          ref={messagesContainerRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto p-4 space-y-4 select-none scroll-smooth"
+        >
         
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
@@ -903,7 +997,15 @@ export default function ChatRoom({
                 <div className="flex items-start gap-1.5 max-w-[85%] relative">
                   
                   {!isMe && (
-                    <div className="w-6 h-6 rounded-full bg-rose-100 flex items-center justify-center text-xs mt-1 shrink-0">
+                    <div 
+                      onClick={() => {
+                        if (typeof window !== 'undefined' && (window as any).navigateToProfile && user.partnerId) {
+                          (window as any).navigateToProfile(user.partnerId);
+                        }
+                      }}
+                      className="w-6 h-6 rounded-full bg-rose-100 flex items-center justify-center text-xs mt-1 shrink-0 cursor-pointer hover:scale-115 active:scale-95 transition-all"
+                      title={`${user.partnerName || 'Companion'}'s profile room`}
+                    >
                       {isImageString(user.partnerPhoto) ? (
                         <img src={user.partnerPhoto} alt="" className="w-full h-full object-cover rounded-full" />
                       ) : (
@@ -1052,7 +1154,15 @@ export default function ChatRoom({
 
         {typingPartner && (
           <div className="flex items-center gap-2 max-w-[80%]">
-            <div className="w-6 h-6 rounded-full bg-rose-100 flex items-center justify-center text-xs shrink-0">
+            <div 
+              onClick={() => {
+                if (typeof window !== 'undefined' && (window as any).navigateToProfile && user.partnerId) {
+                  (window as any).navigateToProfile(user.partnerId);
+                }
+              }}
+              className="w-6 h-6 rounded-full bg-rose-100 flex items-center justify-center text-xs shrink-0 cursor-pointer hover:scale-115 active:scale-95 transition-all"
+              title={`${user.partnerName || 'Companion'}'s profile room`}
+            >
               {isImageString(user.partnerPhoto) ? (
                 <img src={user.partnerPhoto} alt="" className="w-full h-full object-cover rounded-full" />
               ) : (
@@ -1069,6 +1179,30 @@ export default function ChatRoom({
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Floating bottom badge */}
+      <AnimatePresence>
+        {showScrollBottomBadge && (
+          <motion.button
+            initial={{ opacity: 0, y: 15, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 15, scale: 0.9 }}
+            type="button"
+            onClick={() => {
+              const el = messagesContainerRef.current;
+              if (el) {
+                el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+              }
+              setShowScrollBottomBadge(false);
+            }}
+            className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs rounded-full shadow-lg flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all z-20"
+          >
+            <span>New Messages</span>
+            <span className="text-[10px]">↓</span>
+          </motion.button>
+        )}
+      </AnimatePresence>
+    </div>
 
       {/* Love Stickers & GIF Drawer */}
       <AnimatePresence>

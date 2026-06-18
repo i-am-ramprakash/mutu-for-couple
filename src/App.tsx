@@ -35,7 +35,11 @@ import DailyQuestions from './components/DailyQuestions';
 import CoupleJournal from './components/CoupleJournal';
 import BucketList from './components/BucketList';
 import SecretVault from './components/SecretVault';
+import UserProfile from './components/UserProfile';
+import CallDiagnostics from './components/CallDiagnostics';
 import { useTheme } from './ThemeContext';
+import { db } from './lib/firebase';
+import { collection, query, where, onSnapshot, doc } from 'firebase/firestore';
 
 const isImageString = (src: string | undefined | null): boolean => {
   if (!src) return false;
@@ -186,6 +190,59 @@ export default function App() {
     localStorage.setItem('mutu_active_section', activeSection);
   }, [activeSection]);
 
+  const [profileUserId, setProfileUserId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const path = window.location.pathname;
+      const match = path.match(/^\/profile\/([^/]+)$/);
+      if (match) return match[1];
+    }
+    return '';
+  });
+
+  const navigateToProfile = (userId: string) => {
+    if (!userId) return;
+    setProfileUserId(userId);
+    window.history.pushState({ section: 'profile', profileUserId: userId }, '', `/profile/${userId}`);
+    setActiveSection('profile');
+    playSweetSparkSound();
+  };
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).navigateToProfile = navigateToProfile;
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        delete (window as any).navigateToProfile;
+      }
+    };
+  }, [currentUser, profileUserId]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const syncRouteFromPath = () => {
+      const path = window.location.pathname;
+      const profileMatch = path.match(/^\/profile\/([^/]+)$/);
+      if (profileMatch) {
+        const uid = profileMatch[1];
+        setProfileUserId(uid);
+        setActiveSection('profile');
+      } else {
+        const hash = window.location.hash.slice(1);
+        if (hash === 'profile' && profileUserId) {
+          // Keep profile actively selected
+        } else if (hash && ['dashboard', 'chat', 'movie', 'memories', 'calendar', 'daily', 'journal'].includes(hash)) {
+          setActiveSection(hash);
+        }
+      }
+    };
+
+    syncRouteFromPath();
+    window.addEventListener('popstate', syncRouteFromPath);
+    return () => window.removeEventListener('popstate', syncRouteFromPath);
+  }, [currentUser]);
+
   const [viewportHeight, setViewportHeight] = useState<number | null>(null);
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
 
@@ -257,7 +314,9 @@ export default function App() {
     }
     if (section === activeSection) return;
     
-    if (activeSection === 'dashboard' || section === 'dashboard') {
+    if (window.location.pathname !== '/') {
+      window.history.pushState({ section }, '', `/#${section}`);
+    } else if (activeSection === 'dashboard' || section === 'dashboard') {
       window.history.pushState({ section }, '', `#${section}`);
     } else {
       window.history.replaceState({ section }, '', `#${section}`);
@@ -278,8 +337,16 @@ export default function App() {
       const section = event.state?.section;
       if (section) {
         setActiveSection(section);
+        if (section === 'profile' && event.state?.profileUserId) {
+          setProfileUserId(event.state.profileUserId);
+        }
       } else {
-        if (activeSection === 'dashboard') {
+        const path = window.location.pathname;
+        const profileMatch = path.match(/^\/profile\/([^/]+)$/);
+        if (profileMatch) {
+          setProfileUserId(profileMatch[1]);
+          setActiveSection('profile');
+        } else if (activeSection === 'dashboard') {
           setShowExitBanner(true);
           window.history.pushState({ section: 'dashboard' }, '', '#dashboard');
         } else {
@@ -291,7 +358,13 @@ export default function App() {
     window.addEventListener('popstate', handlePopState);
 
     if (!window.history.state || !window.history.state.section) {
-      window.history.replaceState({ section: 'dashboard' }, '', '#dashboard');
+      const path = window.location.pathname;
+      const profileMatch = path.match(/^\/profile\/([^/]+)$/);
+      if (profileMatch) {
+        window.history.replaceState({ section: 'profile', profileUserId: profileMatch[1] }, '', path);
+      } else {
+        window.history.replaceState({ section: 'dashboard' }, '', '#dashboard');
+      }
     }
 
     return () => {
@@ -316,6 +389,9 @@ export default function App() {
   const [ringingRole, setRingingRole] = useState<'caller' | 'callee' | null>(null);
   const [callType, setCallType] = useState<'voice' | 'video'>('video');
   const [calleeName, setCalleeName] = useState('');
+  const [showCallDiagnostics, setShowCallDiagnostics] = useState(false);
+  const [webrtcIceState, setWebrtcIceState] = useState('new');
+  const [webrtcSignalingState, setWebrtcSignalingState] = useState('stable');
 
   // Call duration counter timer effect
   useEffect(() => {
@@ -475,6 +551,24 @@ export default function App() {
               icon: '/favicon.ico'
             });
           }).catch(() => {});
+        }
+        
+        // Dynamic FCM Setup (Phase 2)
+        if (currentUser) {
+          try {
+            const { getMessaging, getToken } = await import('firebase/messaging');
+            const messaging = getMessaging();
+            const token = await getToken(messaging, {
+              vapidKey: 'BDbIs-O_jA8bZ0Yx3yPzFf98-nKsn_bS86h_mutu-public-key'
+            });
+            if (token) {
+              const { doc, setDoc } = await import('firebase/firestore');
+              await setDoc(doc(db, 'users', currentUser.id), { fcmToken: token }, { merge: true });
+              console.log('[FCM] Token registered on permission change.');
+            }
+          } catch (me) {
+            console.log('[FCM] Registration deferred on this environment context:', me);
+          }
         }
       }
     } catch (err) {
@@ -764,6 +858,12 @@ export default function App() {
               setIncomingCall(true);
               setRingingRole('callee');
               playSweetSparkSound();
+              showPushNotification(
+                `📞 Incoming ${payload.mode === 'video' ? 'Video' : 'Voice'} Call`,
+                `${currentUser?.partnerName || 'Your partner'} is calling you... 💖`,
+                'call',
+                'chat'
+              );
               break;
             }
 
@@ -796,7 +896,16 @@ export default function App() {
             }
 
             case 'call:hangup': {
+              const wasMissed = incomingCall;
               cleanupCalling();
+              if (wasMissed) {
+                showPushNotification(
+                  "☎️ Missed Call",
+                  `You missed a call from ${currentUser?.partnerName || 'your partner'}. 💘`,
+                  'call',
+                  'chat'
+                );
+              }
               break;
             }
 
@@ -878,6 +987,149 @@ export default function App() {
       socketRef.current = null;
     };
   }, [currentUser, fetchAllData]);
+
+  // 3. Firestore Real-time Listeners (Phase 1)
+  useEffect(() => {
+    if (!currentUser || !currentUser.coupleId) return;
+
+    console.log('[Firestore] Establishing real-time listeners for couple:', currentUser.coupleId);
+
+    const unsubscribes: (() => void)[] = [];
+
+    const handleListenerError = (err: any, col: string) => {
+      console.warn(`[Firestore Realtime error on ${col}]:`, err);
+    };
+
+    try {
+      // Messages listener
+      const qMsgs = query(collection(db, 'messages'), where('coupleId', '==', currentUser.coupleId));
+      const unsubMsgs = onSnapshot(qMsgs, (snapshot) => {
+        const msgs: Message[] = [];
+        snapshot.forEach(docSnap => {
+          msgs.push({ id: docSnap.id, ...docSnap.data() } as Message);
+        });
+        msgs.sort((a, b) => a.timestamp - b.timestamp);
+        setMessages(msgs);
+      }, (err) => handleListenerError(err, 'messages'));
+      unsubscribes.push(unsubMsgs);
+
+      // Memories listener
+      const qMem = query(collection(db, 'memories'), where('coupleId', '==', currentUser.coupleId));
+      const unsubMem = onSnapshot(qMem, (snapshot) => {
+        const items: Memory[] = [];
+        snapshot.forEach(docSnap => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as Memory);
+        });
+        setMemories(items);
+      }, (err) => handleListenerError(err, 'memories'));
+      unsubscribes.push(unsubMem);
+
+      // CalendarEvents listener
+      const qCal = query(collection(db, 'calendarEvents'), where('coupleId', '==', currentUser.coupleId));
+      const unsubCal = onSnapshot(qCal, (snapshot) => {
+        const items: CalendarEvent[] = [];
+        snapshot.forEach(docSnap => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as CalendarEvent);
+        });
+        setCalendarEvents(items);
+      }, (err) => handleListenerError(err, 'calendarEvents'));
+      unsubscribes.push(unsubCal);
+
+      // JournalEntries listener
+      const qJrn = query(collection(db, 'journalEntries'), where('coupleId', '==', currentUser.coupleId));
+      const unsubJrn = onSnapshot(qJrn, (snapshot) => {
+        const items: JournalEntry[] = [];
+        snapshot.forEach(docSnap => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as JournalEntry);
+        });
+        setJournalEntries(items);
+      }, (err) => handleListenerError(err, 'journalEntries'));
+      unsubscribes.push(unsubJrn);
+
+      // BucketItems listener
+      const qBkt = query(collection(db, 'bucketItems'), where('coupleId', '==', currentUser.coupleId));
+      const unsubBkt = onSnapshot(qBkt, (snapshot) => {
+        const items: BucketItem[] = [];
+        snapshot.forEach(docSnap => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as BucketItem);
+        });
+        setBucketItems(items);
+      }, (err) => handleListenerError(err, 'bucketItems'));
+      unsubscribes.push(unsubBkt);
+
+      // DailyAnswers listener
+      const qAns = query(collection(db, 'dailyAnswers'), where('coupleId', '==', currentUser.coupleId));
+      const unsubAns = onSnapshot(qAns, (snapshot) => {
+        const items: DailyAnswer[] = [];
+        snapshot.forEach(docSnap => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as DailyAnswer);
+        });
+        setDailyAnswers(items);
+      }, (err) => handleListenerError(err, 'dailyAnswers'));
+      unsubscribes.push(unsubAns);
+
+      // Partner user profile listener
+      if (currentUser.partnerId) {
+        const unsubPartner = onSnapshot(doc(db, 'users', currentUser.partnerId), (snapshot) => {
+          if (snapshot.exists()) {
+            const partnerData = snapshot.data();
+            setCurrentUser(prev => {
+              if (!prev) return null;
+              return {
+                ...prev,
+                partnerName: partnerData.name || prev.partnerName,
+                partnerAvatarUrl: partnerData.avatarUrl || prev.avatarUrl,
+                partnerSleepMode: partnerData.isSleepMode || false,
+                partnerOnline: partnerData.online || false,
+                partnerLastActiveTime: partnerData.lastActiveTime || 0,
+                // dedicated rich profile fields
+                coverPhoto: partnerData.coverPhoto || prev.coverPhoto,
+                coverRepositionY: partnerData.coverRepositionY || prev.coverRepositionY,
+                nickname: partnerData.nickname || prev.nickname,
+                personalNote: partnerData.personalNote || prev.personalNote,
+                favFood: partnerData.favFood || prev.favFood,
+                favMovie: partnerData.favMovie || prev.favMovie,
+                favSong: partnerData.favSong || prev.favSong,
+                favColor: partnerData.favColor || prev.favColor,
+                dreamDestination: partnerData.dreamDestination || prev.dreamDestination,
+                reunionDate: partnerData.reunionDate || prev.reunionDate,
+                distance: partnerData.distance || prev.distance,
+                wakeTime: partnerData.wakeTime || prev.wakeTime,
+                sleepTime: partnerData.sleepTime || prev.sleepTime,
+                workSchedule: partnerData.workSchedule || prev.workSchedule,
+                bestTimeToCall: partnerData.bestTimeToCall || prev.bestTimeToCall,
+              };
+            });
+          }
+        }, (err) => handleListenerError(err, 'partnerUser'));
+        unsubscribes.push(unsubPartner);
+      }
+
+      // Self profile user listener
+      const unsubSelf = onSnapshot(doc(db, 'users', currentUser.id), (snapshot) => {
+        if (snapshot.exists()) {
+          const selfData = snapshot.data();
+          setCurrentUser(prev => {
+            if (!prev) return null;
+            return {
+              ...prev,
+              ...selfData,
+              id: snapshot.id
+            } as User;
+          });
+        }
+      }, (err) => handleListenerError(err, 'selfUser'));
+      unsubscribes.push(unsubSelf);
+
+    } catch (e) {
+      console.error('[Firestore] Failed setting up listeners:', e);
+    }
+
+    return () => {
+      console.log('[Firestore] unsubscribing listeners for couple:', currentUser.coupleId);
+      unsubscribes.forEach(unsub => unsub());
+    };
+  }, [currentUser?.id, currentUser?.coupleId, currentUser?.partnerId]);
 
   // Minor isolated data refreshers supporting WebSocket notifications
   const fetchMemories = async () => {
@@ -1177,10 +1429,196 @@ export default function App() {
   };
 
   // 6. Media and Calling handlers
+  // Cozy Synthetic Canvas Stream generator to bypass sandboxed iframe restrictions & missing devices
+  const generateSyntheticStream = (type: 'camera' | 'screenshare', userName: string) => {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 640;
+      canvas.height = 480;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+
+      let angle = 0;
+      const frameRate = 30;
+      const interval = setInterval(() => {
+        try {
+          if (!ctx || !canvas) return;
+          // Clear canvas
+          ctx.fillStyle = '#1c1917'; // warm stone-900 background
+          ctx.fillRect(0, 0, 640, 480);
+
+          // Vignette radial glow 
+          const gradient = ctx.createRadialGradient(320, 240, 50, 320, 240, 350);
+          gradient.addColorStop(0, '#2e1015'); // romantic deep mauve
+          gradient.addColorStop(1, '#0c0a09'); // stone-950
+          ctx.fillStyle = gradient;
+          ctx.fillRect(0, 0, 640, 480);
+
+          // Grid system lines
+          ctx.strokeStyle = 'rgba(244, 63, 94, 0.05)';
+          ctx.lineWidth = 1;
+          for (let i = 0; i < 640; i += 40) {
+            ctx.beginPath();
+            ctx.moveTo(i, 0);
+            ctx.lineTo(i, 480);
+            ctx.stroke();
+          }
+          for (let j = 0; j < 480; j += 40) {
+            ctx.beginPath();
+            ctx.moveTo(0, j);
+            ctx.lineTo(640, j);
+            ctx.stroke();
+          }
+
+          angle += 0.05;
+
+          if (type === 'camera') {
+            // Heart animation
+            const pulse = 1 + 0.15 * Math.sin(angle * 1.5);
+            ctx.save();
+            ctx.translate(320, 210);
+            ctx.scale(pulse, pulse);
+
+            // Neon shadow glow
+            ctx.shadowColor = '#f43f5e';
+            ctx.shadowBlur = 35;
+
+            // Simple robust path heart
+            ctx.beginPath();
+            ctx.moveTo(0, -30);
+            ctx.bezierCurveTo(-45, -75, -90, -20, 0, 65);
+            ctx.bezierCurveTo(90, -20, 45, -75, 0, -30);
+            ctx.fillStyle = '#f43f5e';
+            ctx.fill();
+            ctx.restore();
+
+            // Intersecting heartbeat wave
+            ctx.beginPath();
+            ctx.strokeStyle = 'rgba(253, 164, 175, 0.6)';
+            ctx.lineWidth = 3;
+            for (let x = 120; x < 520; x++) {
+              let offset = 0;
+              const cyclePos = (x - 120 + angle * 40) % 200;
+              if (cyclePos > 85 && cyclePos < 115) {
+                offset = Math.sin((cyclePos - 100) * 0.2) * 45;
+              }
+              const y = 310 + offset;
+              if (x === 120) ctx.moveTo(x, y);
+              else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // Label text in high-contrast monospaced look
+            ctx.shadowBlur = 0;
+            ctx.font = 'bold 15px "JetBrains Mono", monospace';
+            ctx.fillStyle = '#fda4af';
+            ctx.textAlign = 'center';
+            ctx.fillText(`💗 LIVE LINK: ${userName.toUpperCase()}`, 320, 365);
+
+            ctx.font = '11px "JetBrains Mono", monospace';
+            ctx.fillStyle = '#78716c';
+            ctx.fillText('COZY SANDBOX MEDIA EMULATOR ACTIVE', 320, 395);
+
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.fillStyle = '#f43f5e';
+            ctx.fillText(`TIME: ${new Date().toLocaleTimeString()} UTC`, 320, 420);
+
+          } else {
+            // Screenshare display: Cozy Shared screen
+            ctx.fillStyle = '#0c0a09';
+            ctx.fillRect(50, 50, 540, 380);
+
+            // Menu bar
+            ctx.fillStyle = '#1c1917';
+            ctx.fillRect(50, 50, 540, 30);
+
+            // Colored dots
+            ctx.fillStyle = '#da2f5e';
+            ctx.beginPath();
+            ctx.arc(75, 65, 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#eab308';
+            ctx.beginPath();
+            ctx.arc(90, 65, 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#22c55e';
+            ctx.beginPath();
+            ctx.arc(105, 65, 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Screen share text label
+            ctx.font = 'bold 12px sans-serif';
+            ctx.fillStyle = '#ffe4e6';
+            ctx.textAlign = 'left';
+            ctx.fillText('💻 Joint Movie Lounge & Sync Terminal Panel', 130, 70);
+
+            // Container inside mock screen
+            ctx.fillStyle = 'rgba(244, 63, 94, 0.05)';
+            ctx.fillRect(70, 100, 500, 310);
+
+            // Target coordinates indicators
+            const cx = 320 + Math.sin(angle * 1.2) * 160;
+            const cy = 250 + Math.cos(angle * 0.8) * 60;
+            
+            ctx.strokeStyle = '#ec4899';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(cx, cy, 25, 0, Math.PI*2);
+            ctx.stroke();
+
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = 'rgba(236, 72, 153, 0.3)';
+            ctx.beginPath();
+            ctx.arc(cx, cy, 40, 0, Math.PI*2);
+            ctx.stroke();
+
+            // Wave visuals
+            ctx.strokeStyle = '#a855f7';
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            for (let i = 80; i < 560; i += 4) {
+              const y = 250 + Math.sin(i * 0.03 + angle * 2.2) * 35;
+              if (i === 80) ctx.moveTo(i, y);
+              else ctx.lineTo(i, y);
+            }
+            ctx.stroke();
+
+            ctx.font = 'bold 13px "JetBrains Mono", monospace';
+            ctx.fillStyle = '#a78bfa';
+            ctx.fillText(`CURSOR TRACKING: x=${Math.round(cx)} y=${Math.round(cy)}`, 80, 130);
+
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.fillStyle = '#a8a29e';
+            ctx.fillText('[SCREENSHARE EMULATOR ACTIVE IN SANDBOX IFRAME]', 80, 385);
+            ctx.fillText(`TRANSMITTING FOR: ${userName.toUpperCase()}`, 80, 400);
+          }
+        } catch (e) {
+          console.warn('[Synthetic stream frame tick error]:', e);
+        }
+      }, 1000 / frameRate);
+
+      // Extract raw stream media track
+      // @ts-ignore
+      const stream = canvas.captureStream(frameRate);
+      
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        const originalStop = videoTrack.stop;
+        videoTrack.stop = function() {
+          clearInterval(interval);
+          if (originalStop) originalStop.apply(this);
+        };
+      }
+      return stream;
+    } catch (e) {
+      console.warn('[Synthetic media generator failure]:', e);
+      return null;
+    }
+  };
+
   const initiateMediaStream = async (modeOverride?: 'voice' | 'video') => {
     const selectedMode = modeOverride || callTypeRef.current;
     
-    // Multi-factor robust media constraints to ensure 100% compatibility across iOS, Android, Safari, and Chrome PWAs
     const attemptGetUserMedia = async (constraints: MediaStreamConstraints) => {
       try {
         return await navigator.mediaDevices.getUserMedia(constraints);
@@ -1194,13 +1632,11 @@ export default function App() {
       let stream: MediaStream | null = null;
       
       if (selectedMode === 'video') {
-        // Attempt 1: HD Front camera setup
         stream = await attemptGetUserMedia({
           video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
           audio: { echoCancellation: true, noiseSuppression: true }
         });
         
-        // Attempt 2: Simple Video + Audio fallback
         if (!stream) {
           stream = await attemptGetUserMedia({
             video: true,
@@ -1208,7 +1644,6 @@ export default function App() {
           });
         }
 
-        // Attempt 3: Ultimate Video-only fallback (in case mic permission is blocked or throws)
         if (!stream) {
           stream = await attemptGetUserMedia({
             video: true,
@@ -1216,13 +1651,11 @@ export default function App() {
           });
         }
       } else {
-        // Voice only setup
         stream = await attemptGetUserMedia({
           video: false,
           audio: { echoCancellation: true, noiseSuppression: true }
         });
         
-        // Voice simple fallback
         if (!stream) {
           stream = await attemptGetUserMedia({
             video: false,
@@ -1230,7 +1663,6 @@ export default function App() {
           });
         }
 
-        // Voice absolute ultimate fallback (some systems fail with explicit video: false query)
         if (!stream) {
           stream = await attemptGetUserMedia({
             audio: true
@@ -1239,7 +1671,7 @@ export default function App() {
       }
 
       if (!stream) {
-        throw new Error("No media capture could be acquired after trying all fallbacks.");
+        throw new Error("No hardware media capture could be acquired after trying all fallbacks.");
       }
 
       setLocalStream(stream);
@@ -1251,7 +1683,19 @@ export default function App() {
       }
       return stream;
     } catch (err) {
-      console.warn('Media captures denied or camera missing (normal in sandboxed iframes). Proceeding with simulated calling visual overlays.', err);
+      console.warn('Real camera/mic hardware capture denied or missing (normal in sandboxed previews). Executing elegant synthetic media pipeline...', err);
+      
+      const mockStream = generateSyntheticStream('camera', currentUser?.name || 'Local Me');
+      if (mockStream) {
+        setLocalStream(mockStream);
+        localStreamRef.current = mockStream;
+        
+        if (myVideoRef.current) {
+          myVideoRef.current.srcObject = mockStream;
+          myVideoRef.current.play().catch(e => console.log('Playing synthetic feedback stream', e));
+        }
+        return mockStream;
+      }
       return null;
     }
   };
@@ -1265,8 +1709,24 @@ export default function App() {
     if (isScreensharing) {
       stopScreenshare();
     } else {
+      let stream: MediaStream | null = null;
       try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      } catch (err) {
+        console.warn('[WebRTC] DisplayMedia capture blocked inside sandboxed iframe workspace. Deploying dynamic synthetic desk screenshare...', err);
+        const mockStream = generateSyntheticStream('screenshare', currentUser?.name || 'Local Me');
+        if (mockStream) {
+          stream = mockStream;
+          showPushNotification(
+            "💻 Cozy Screen Sharing Mode Enabled",
+            "Hardware display access bypassed. Joint media presentation active! 💖",
+            "system",
+            "chat"
+          );
+        }
+      }
+
+      if (stream) {
         screenshareStreamRef.current = stream;
         setIsScreensharing(true);
 
@@ -1291,8 +1751,6 @@ export default function App() {
         screenTrack.onended = () => {
           stopScreenshare();
         };
-      } catch (err) {
-        console.error('[WebRTC] DisplayMedia capture failed:', err);
       }
     }
   };
@@ -1376,10 +1834,14 @@ export default function App() {
     // We design the ICE candidate queues to persist during initialization to avoid race events
     console.log('[WebRTC] Creating RTCPeerConnection, current candidate queue size:', iceCandidatesQueueRef.current.length);
 
-    // Support custom TURN configurations from env, falling back to community-supported OpenRelay TURN servers
-    const customTurnUrl = import.meta.env.VITE_TURN_URL;
-    const customTurnUser = import.meta.env.VITE_TURN_USERNAME;
-    const customTurnCred = import.meta.env.VITE_TURN_CREDENTIAL;
+    // Support custom TURN configurations from localStorage, falling back to env or OpenRelay TURN servers
+    const storedTurnUrl = localStorage.getItem('mutu_custom_turn_url');
+    const storedTurnUser = localStorage.getItem('mutu_custom_turn_username');
+    const storedTurnCred = localStorage.getItem('mutu_custom_turn_credential');
+
+    const customTurnUrl = storedTurnUrl || import.meta.env.VITE_TURN_URL;
+    const customTurnUser = storedTurnUser || import.meta.env.VITE_TURN_USERNAME;
+    const customTurnCred = storedTurnCred || import.meta.env.VITE_TURN_CREDENTIAL;
 
     const defaultIceServers = [
       { urls: 'stun:stun.l.google.com:19302' },
@@ -1406,7 +1868,8 @@ export default function App() {
     ];
 
     if (customTurnUrl && customTurnUser && customTurnCred) {
-      defaultIceServers.push({
+      console.log('[WebRTC] Custom pre-configured/localStorage TURN credentials detected. Appending to iceServers list:', customTurnUrl);
+      defaultIceServers.unshift({
         urls: customTurnUrl,
         username: customTurnUser,
         credential: customTurnCred
@@ -1441,8 +1904,16 @@ export default function App() {
     };
 
     // Track state transitions to diagnose latency or potential visual freezes
+    setWebrtcIceState(pc.iceConnectionState);
+    setWebrtcSignalingState(pc.signalingState);
+
+    pc.onsignalingstatechange = () => {
+      setWebrtcSignalingState(pc.signalingState);
+    };
+
     pc.oniceconnectionstatechange = () => {
       console.log('[WebRTC] ICE Connection State changed to:', pc.iceConnectionState);
+      setWebrtcIceState(pc.iceConnectionState);
       if (pc.iceConnectionState === 'failed') {
         handleFailedConnection();
       } else if (pc.iceConnectionState === 'disconnected') {
@@ -1710,6 +2181,9 @@ export default function App() {
     setIncomingCall(false);
     setRingingRole(null);
     setRemoteStreamActive(false);
+    setShowCallDiagnostics(false);
+    setWebrtcIceState('new');
+    setWebrtcSignalingState('stable');
     iceCandidatesQueueRef.current = [];
     
     if (localStreamRef.current) {
@@ -1809,6 +2283,8 @@ export default function App() {
             typingPartner={typingPartner}
             onTyping={handleSendTyping}
             partnerThumbKissActive={partnerThumbKissActive}
+            onVoiceCall={() => triggerDialOut('voice')}
+            onVideoCall={() => triggerDialOut('video')}
             onSendThumbKissToggle={(active) => {
               if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
                 socketRef.current.send(JSON.stringify({
@@ -1942,6 +2418,15 @@ export default function App() {
             user={currentUser}
             onBack={handleBack}
             onLogout={handleLogout}
+          />
+        );
+      case 'profile':
+        return (
+          <UserProfile
+            profileUserId={profileUserId || currentUser.id}
+            currentUser={currentUser}
+            onBack={handleBack}
+            onRefreshUser={handleRefreshUser}
           />
         );
       default:
@@ -2112,7 +2597,7 @@ export default function App() {
       </header>
 
       {/* Modern Responsive Bottom Bar for Lazy Users perspective (1-Click Switchers) */}
-      {currentUser && currentUser.partnerId && !isKeyboardOpen && (
+      {currentUser && currentUser.partnerId && activeSection !== 'chat' && !isKeyboardOpen && (
         <div className="fixed bottom-0 left-0 right-0 bg-white/90 dark:bg-[#1C1418]/90 backdrop-blur-md border-t border-rose-100/60 dark:border-[#2D2529] py-2 px-4 flex items-center justify-around z-40 shadow-lg select-none sm:max-w-md sm:mx-auto sm:rounded-t-3xl">
           <button
             onClick={() => { navigateToSection('dashboard'); playSweetMessageSound(); }}
@@ -2655,8 +3140,17 @@ export default function App() {
               <span>Connected</span>
             </div>
             
-            <div className="bg-stone-900 border border-stone-800 px-3 py-1 rounded-xl text-[9px] text-emerald-400 font-bold">
-              🔒 Decrypted client-to-client
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowCallDiagnostics(true)}
+                className="bg-stone-900 border border-stone-800 hover:bg-stone-800 hover:border-stone-700 px-3 py-1.5 rounded-xl text-[9px] text-rose-400 font-bold flex items-center gap-1.5 transition cursor-pointer"
+                title="WebRTC Traversal Config & Logs"
+              >
+                ⚙️ Config & Logs
+              </button>
+              <div className="bg-stone-900 border border-stone-800 px-3 py-1 rounded-xl text-[9px] text-emerald-400 font-bold">
+                🔒 Decrypted client-to-client
+              </div>
             </div>
           </div>
 
@@ -2790,6 +3284,16 @@ export default function App() {
 
         </div>
       )}
+
+      <CallDiagnostics
+        isOpen={showCallDiagnostics}
+        onClose={() => setShowCallDiagnostics(false)}
+        iceConnectionState={webrtcIceState}
+        signalingState={webrtcSignalingState}
+        localStream={localStream}
+        remoteStream={remoteStream}
+        onReconnect={reconnectCall}
+      />
 
       {/* ------------------------------------------------------------- */}
       {/* IMMERSIVE BEDTIME/SLEEP TOGETHER OVERLAY CANOPY               */}

@@ -7,24 +7,30 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-// Handle background notification clicks to bring users back in-app
+// Handle background notification clicks to bring users back in-app (Phase 3 Deep-linking)
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   
+  const section = event.notification.data?.section || 'chat';
+  const targetHash = `#${section}`;
+  
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      if (clientList.length > 0) {
-        let client = clientList[0];
-        // If a window is already active/focused, use that one
-        for (let i = 0; i < clientList.length; i++) {
-          if (clientList[i].focused) {
-            client = clientList[i];
-            break;
-          }
+      const targetUrl = new URL(`/${targetHash}`, self.location.origin).href;
+      
+      // Look for any existing matching tab
+      for (let i = 0; i < clientList.length; i++) {
+        const client = clientList[i];
+        if (client.url.startsWith(self.location.origin) && 'navigate' in client) {
+          client.navigate(targetUrl);
+          return client.focus();
         }
-        return client.focus();
       }
-      return self.clients.openWindow('/');
+      
+      // Otherwise open a new tab
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl);
+      }
     })
   );
 });

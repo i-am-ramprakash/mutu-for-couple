@@ -604,12 +604,24 @@ app.post('/api/couple/update-anniversary', async (req, res) => {
 
 // Update User profile (location, check-in mood, love language, love timer customization, appTheme)
 app.post('/api/couple/update-profile', async (req, res) => {
-  const { userId, locationCity, locationTimezone, locationWeather, checkInMood, checkInLoveLanguage, customLoveCounterTitle, appTheme } = req.body;
+  const { 
+    userId, name, birthday, locationCity, locationTimezone, locationWeather, checkInMood, 
+    checkInLoveLanguage, customLoveCounterTitle, appTheme,
+    profilePhoto, coverPhoto, coverRepositionY, nickname, personalNote,
+    favFood, favMovie, favSong, favColor, dreamDestination, reunionDate, distance,
+    wakeTime, sleepTime, workSchedule, bestTimeToCall,
+    favPhoto, favVoiceNoteText, favLetterTitle, favMemoryText,
+    sharedGoals, plannedTrips, lifeMilestones, currentPresenceStatus
+  } = req.body;
+  
   if (!userId) return res.status(400).json({ error: 'userId is required.' });
 
   const user = db.users.find(u => u.id === userId);
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
+  // Update provided fields dynamically
+  if (name !== undefined) user.name = name;
+  if (birthday !== undefined) user.birthday = birthday;
   if (locationCity !== undefined) user.locationCity = locationCity;
   if (locationTimezone !== undefined) user.locationTimezone = locationTimezone;
   if (locationWeather !== undefined) user.locationWeather = locationWeather;
@@ -617,6 +629,32 @@ app.post('/api/couple/update-profile', async (req, res) => {
   if (checkInLoveLanguage !== undefined) user.checkInLoveLanguage = checkInLoveLanguage;
   if (customLoveCounterTitle !== undefined) user.customLoveCounterTitle = customLoveCounterTitle;
   if (appTheme !== undefined) user.appTheme = appTheme;
+  
+  // Custom Profile fields
+  if (profilePhoto !== undefined) user.profilePhoto = profilePhoto;
+  if (coverPhoto !== undefined) user.coverPhoto = coverPhoto;
+  if (coverRepositionY !== undefined) user.coverRepositionY = coverRepositionY;
+  if (nickname !== undefined) user.nickname = nickname;
+  if (personalNote !== undefined) user.personalNote = personalNote;
+  if (favFood !== undefined) user.favFood = favFood;
+  if (favMovie !== undefined) user.favMovie = favMovie;
+  if (favSong !== undefined) user.favSong = favSong;
+  if (favColor !== undefined) user.favColor = favColor;
+  if (dreamDestination !== undefined) user.dreamDestination = dreamDestination;
+  if (reunionDate !== undefined) user.reunionDate = reunionDate;
+  if (distance !== undefined) user.distance = distance;
+  if (wakeTime !== undefined) user.wakeTime = wakeTime;
+  if (sleepTime !== undefined) user.sleepTime = sleepTime;
+  if (workSchedule !== undefined) user.workSchedule = workSchedule;
+  if (bestTimeToCall !== undefined) user.bestTimeToCall = bestTimeToCall;
+  if (favPhoto !== undefined) user.favPhoto = favPhoto;
+  if (favVoiceNoteText !== undefined) user.favVoiceNoteText = favVoiceNoteText;
+  if (favLetterTitle !== undefined) user.favLetterTitle = favLetterTitle;
+  if (favMemoryText !== undefined) user.favMemoryText = favMemoryText;
+  if (sharedGoals !== undefined) user.sharedGoals = sharedGoals;
+  if (plannedTrips !== undefined) user.plannedTrips = plannedTrips;
+  if (lifeMilestones !== undefined) user.lifeMilestones = lifeMilestones;
+  if (currentPresenceStatus !== undefined) user.currentPresenceStatus = currentPresenceStatus;
 
   saveDB();
 
@@ -633,6 +671,26 @@ app.post('/api/couple/update-profile', async (req, res) => {
   }
 
   res.json({ success: true, hydratedUser: hydrateUser(userId) });
+});
+
+// GET dedicated user profile endpoint
+app.get('/api/user/profile/:userId', (req, res) => {
+  const { userId } = req.params;
+  const user = db.users.find(u => u.id === userId);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  // Calculate live presence
+  const isOnline = clientSockets.has(userId);
+  const lastActive = lastSeenMap.get(userId) || Date.now() - 120000;
+
+  res.json({
+    success: true,
+    user: {
+      ...user,
+      isOnline,
+      lastActive
+    }
+  });
 });
 
 // Update Couple Settings (chatBackground)
@@ -2085,6 +2143,17 @@ wss.on('connection', (ws) => {
           lastSeenMap.set(event.userId, Date.now());
           console.log(`WebSocket fully bound for user: ${event.userId}, couple: ${event.coupleId}`);
           
+          // Update presence state in local memory & Firestore
+          db.users = db.users.map(u => {
+            if (u.id === event.userId) {
+              return { ...u, online: true, lastActiveTime: Date.now() };
+            }
+            return u;
+          });
+          updateRecord('users', { id: event.userId, online: true, lastActiveTime: Date.now() }).catch(err => {
+            console.error('[Firestore] Failed to update user online status during init:', err);
+          });
+
           // Broadcast status change immediately to partner
           const partnerId = getPartnerId(event.userId);
           if (partnerId) {
@@ -2306,6 +2375,18 @@ wss.on('connection', (ws) => {
       lastSeenMap.set(boundUserId, Date.now());
       console.log(`WebSocket socket closed for user: ${boundUserId}`);
       
+      const fixedUserId = boundUserId;
+      // Update presence offline state in local memory & Firestore
+      db.users = db.users.map(u => {
+        if (u.id === fixedUserId) {
+          return { ...u, online: false, lastActiveTime: Date.now() };
+        }
+        return u;
+      });
+      updateRecord('users', { id: fixedUserId, online: false, lastActiveTime: Date.now() }).catch(err => {
+        console.error('[Firestore] Failed to update user offline status during close:', err);
+      });
+
       const partnerId = getPartnerId(boundUserId);
       if (partnerId) {
         sendToUser(partnerId, { type: 'state:update', section: 'presence' });
