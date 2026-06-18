@@ -2409,8 +2409,31 @@ async function bootstrap() {
   } else {
     // Production serving
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    
+    // Explicitly set cache control headers for HTML files and service workers to prevent browser caching of entrypoint/workers
+    app.use((req, res, next) => {
+      const isHtmlOrSw = req.path.endsWith('.html') || 
+                         (req.path.endsWith('.js') && (req.path.includes('sw') || req.path.includes('sw.js'))) ||
+                         req.path === '/';
+      if (isHtmlOrSw) {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+      }
+      next();
+    });
+
+    app.use(express.static(distPath, {
+      setHeaders: (res, filePath) => {
+        const isHtmlOrSwFile = filePath.endsWith('.html') || 
+                               filePath.endsWith('sw.js') || 
+                               filePath.endsWith('firebase-messaging-sw.js');
+        if (isHtmlOrSwFile) {
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+        }
+      }
+    }));
+
     app.get('*', (req, res) => {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

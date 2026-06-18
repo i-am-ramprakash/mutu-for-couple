@@ -285,8 +285,31 @@ export default function AuthScreen({ onAuthSuccess, currentUser, onRefreshUser }
           </div>
 
           {error && (
-            <div className="mb-4 p-3 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/30 text-stone-700 dark:text-rose-200 text-xs text-center" id="auth_error">
-              {error}
+            <div className="mb-4 p-3.5 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/30 text-stone-700 dark:text-rose-200 text-xs text-left" id="auth_error">
+              {error.includes('operation-not-allowed') ? (
+                <div className="space-y-2">
+                  <p className="font-bold text-red-600 dark:text-rose-400 text-[13px] flex items-center gap-1">
+                    🔑 Email/Password Auth Disabled
+                  </p>
+                  <p className="text-stone-600 dark:text-stone-300">
+                    Firebase has blocked this login because <strong>Email/Password Sign-in</strong> is disabled in your Firebase Console.
+                  </p>
+                  <div className="bg-stone-50 dark:bg-stone-900/40 p-3 rounded-lg border border-rose-100/40 dark:border-stone-800 space-y-2 text-[11px] font-sans">
+                    <p className="font-bold text-rose-500">How to fix this in 1 minute:</p>
+                    <ol className="list-decimal list-inside space-y-1 text-stone-500 dark:text-stone-400">
+                      <li>Go to your <a href="https://console.firebase.google.com/project/just-facet-x74w7/authentication/providers" target="_blank" rel="noopener noreferrer" className="underline font-bold text-rose-500 hover:text-rose-600">Firebase Auth Console</a>.</li>
+                      <li>Click the <strong>Add new provider</strong> button (or select Email/Password if visible).</li>
+                      <li>Select <strong>Email/Password</strong>.</li>
+                      <li>Toggle the first switch to <strong>Enable</strong> and click <strong>Save</strong>!</li>
+                    </ol>
+                  </div>
+                  <p className="text-[10px] text-stone-400 mt-1 font-medium animate-pulse">
+                    ✨ After saving, you can instantly log in or register below!
+                  </p>
+                </div>
+              ) : (
+                <span className="text-center block">{error}</span>
+              )}
             </div>
           )}
 
