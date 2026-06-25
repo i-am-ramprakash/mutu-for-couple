@@ -4,7 +4,7 @@ import {
   ArrowLeft, Send, Sparkles, AlertCircle, Heart, 
   Smile, ShieldCheck, Loader2, Image as ImageIcon, Flame,
   Mic, Square, Play, Pause, Trash2, Upload, ZoomIn, X, Reply,
-  Video, VolumeX, Volume2, Phone
+  Video, VolumeX, Volume2, Phone, Search
 } from 'lucide-react';
 import { User, Message, MessageReaction } from '../types';
 import { encryptMessage, decryptMessage } from '../crypto';
@@ -238,12 +238,40 @@ export default function ChatRoom({
   const [isEncrypting, setIsEncrypting] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showGifDrawer, setShowGifDrawer] = useState(false);
+  const [isSearchActive, setIsSearchActive] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [decryptedCache, setDecryptedCache] = useState<Record<string, string>>({});
+  const [loadedImages, setLoadedImages] = useState<Record<string, boolean>>({});
+
+  // Scroll to bottom on mount instantly so latest message is seen without auto scrolling animation (Issue 5 & 6)
+  useEffect(() => {
+    const el = messagesContainerRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+      // Double check in next paint event to ensure perfect layout calculation
+      const paintTimer = setTimeout(() => {
+        if (el) {
+          el.scrollTop = el.scrollHeight;
+        }
+      }, 50);
+      return () => clearTimeout(paintTimer);
+    }
+  }, []);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollBottomBadge, setShowScrollBottomBadge] = useState(false);
   const [lastMessageId, setLastMessageId] = useState<string>('');
   const isInitialMountRef = useRef(true);
+
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth', delay = 60) => {
+    setTimeout(() => {
+      const el = messagesContainerRef.current;
+      if (el) {
+        el.scrollTo({ top: el.scrollHeight, behavior });
+      }
+    }, delay);
+  };
   const typingTimeoutRef = useRef<any>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
@@ -541,6 +569,7 @@ export default function ChatRoom({
       const customPayload = `[IMAGE_ATTACHMENT]:${base64Img}`;
       const pld = await encryptMessage(customPayload, user.loveKey || '');
       onSendMessage({ textEncrypted: pld.ciphertext, iv: pld.iv });
+      scrollToBottom('smooth', 80);
     } catch (err) {
       console.error('Image cryptography push failure:', err);
     } finally {
@@ -568,11 +597,10 @@ export default function ChatRoom({
     }
   };
 
-  // WhatsApp-style message arrival behavior
+  // Message arrival and scrolling notification behavior (No auto scroll on update while reading!)
   useEffect(() => {
     if (messages.length === 0) return;
     const lastMsg = messages[messages.length - 1];
-    const isMyMessage = lastMsg.senderId === user.id;
     const el = messagesContainerRef.current;
 
     if (el) {
@@ -582,15 +610,12 @@ export default function ChatRoom({
         isInitialMountRef.current = false;
         setShowScrollBottomBadge(false);
       } else {
-        const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 200;
+        const isMyMessage = lastMsg.senderId === user.id;
+        const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 250;
         if (isMyMessage || isAtBottom) {
-          setTimeout(() => {
-            if (el) {
-              el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-            }
-          }, 100);
-          setShowScrollBottomBadge(false);
+          scrollToBottom('smooth', 80);
         } else {
+          // Just show a non-intrusive badge if a new message arrives from partner and user is scrolled up
           if (lastMsg.id !== lastMessageId) {
             setShowScrollBottomBadge(true);
           }
@@ -603,17 +628,7 @@ export default function ChatRoom({
   // Adjust scroll when partner is typing to accommodate the bubble
   useEffect(() => {
     if (typingPartner) {
-      const el = messagesContainerRef.current;
-      if (el) {
-        const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 200;
-        if (isAtBottom) {
-          setTimeout(() => {
-            if (el) {
-              el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-            }
-          }, 100);
-        }
-      }
+      scrollToBottom('smooth', 80);
     }
   }, [typingPartner]);
 
@@ -638,6 +653,23 @@ export default function ChatRoom({
 
     decryptAll();
   }, [messages, user.loveKey]);
+
+  // Decrypted message live search filtering matching decrypted strings
+  const displayedMessages = useMemo(() => {
+    if (!isSearchActive || !searchQuery.trim()) return messages;
+    const q = searchQuery.toLowerCase();
+    return messages.filter(msg => {
+      const decryptedVal = decryptedCache[msg.id];
+      if (!decryptedVal) return false;
+      if (decryptedVal.startsWith('[VOICE_NOTE]:') || 
+          decryptedVal.startsWith('[VIDEO_NOTE]:') || 
+          decryptedVal.startsWith('[IMAGE_ATTACHMENT]:') || 
+          decryptedVal.startsWith('[GIF]:')) {
+        return false;
+      }
+      return decryptedVal.toLowerCase().includes(q);
+    });
+  }, [messages, isSearchActive, searchQuery, decryptedCache]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -679,6 +711,7 @@ export default function ChatRoom({
       });
       setInputText('');
       setReplyingTo(null);
+      scrollToBottom('smooth', 80);
       
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       onTyping(false);
@@ -706,6 +739,7 @@ export default function ChatRoom({
       const pld = await encryptMessage(customText, user.loveKey || '');
       onSendMessage({ textEncrypted: pld.ciphertext, iv: pld.iv });
       setShowGifDrawer(false);
+      scrollToBottom('smooth', 80);
     } catch (err) {
       console.error(err);
     } finally {
@@ -768,34 +802,39 @@ export default function ChatRoom({
     setFocusedMessageId(null);
   };
 
-  const [viewportHeight] = useState<string>('100%');
+  const [viewportHeight, setViewportHeight] = useState<number>(typeof window !== 'undefined' ? (window.visualViewport?.height || window.innerHeight) : 0);
+  const [vvOffsetTop, setVvOffsetTop] = useState<number>(0);
+  const [isComposerFocused, setIsComposerFocused] = useState<boolean>(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     
-    const handleResize = () => {
-      setTimeout(() => {
-        const el = messagesContainerRef.current;
-        if (el) {
-          const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 300;
-          if (isAtBottom) {
-            el.scrollTo({ top: el.scrollHeight });
-          }
-        }
-      }, 100);
+    const handleViewportChange = () => {
+      const vv = window.visualViewport;
+      if (vv) {
+        setViewportHeight(vv.height);
+        setVvOffsetTop(vv.offsetTop);
+      } else {
+        setViewportHeight(window.innerHeight);
+        setVvOffsetTop(0);
+      }
     };
 
     const vv = window.visualViewport;
     if (vv) {
-      vv.addEventListener('resize', handleResize);
+      vv.addEventListener('resize', handleViewportChange);
+      vv.addEventListener('scroll', handleViewportChange);
     }
-    window.addEventListener('resize', handleResize);
+    window.addEventListener('resize', handleViewportChange);
+
+    handleViewportChange();
 
     return () => {
       if (vv) {
-        vv.removeEventListener('resize', handleResize);
+        vv.removeEventListener('resize', handleViewportChange);
+        vv.removeEventListener('scroll', handleViewportChange);
       }
-      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('resize', handleViewportChange);
     };
   }, []);
 
@@ -887,15 +926,57 @@ export default function ChatRoom({
     ? { background: user.chatBackground.startsWith('http') ? `url(${user.chatBackground}) center/cover no-repeat` : user.chatBackground }
     : {};
 
+  const wrapperStyle = useMemo(() => {
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+    if (isMobile && typeof window !== 'undefined' && window.visualViewport) {
+      return {
+        ...chatBgStyle,
+        height: `${viewportHeight}px`,
+        position: 'fixed' as const,
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 30,
+        transform: `translateY(${vvOffsetTop}px)`,
+      };
+    }
+    return chatBgStyle;
+  }, [viewportHeight, vvOffsetTop, chatBgStyle]);
+
+  const headerStyle = useMemo(() => {
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+    if (isMobile && typeof window !== 'undefined' && window.visualViewport) {
+      return {
+        position: 'fixed' as const,
+        top: `${vvOffsetTop}px`,
+        left: 0,
+        right: 0,
+        height: '60px',
+        minHeight: '60px',
+        maxHeight: '60px',
+        zIndex: 50,
+        boxSizing: 'border-box' as const,
+        width: '100%',
+        maxWidth: '100vw',
+        flexShrink: 0,
+      };
+    }
+    return {};
+  }, [vvOffsetTop]);
+
   return (
     <div 
       className="w-full max-w-2xl mx-auto flex flex-col md:rounded-3xl rounded-none glass-card md:border border-none overflow-hidden relative transition-all duration-150 h-full" 
       id="chat_room_wrapper"
-      style={chatBgStyle}
+      style={wrapperStyle}
     >
       
       {/* Header section */}
-      <div className="p-3 bg-white/90 dark:bg-stone-900/90 border-b border-rose-100 dark:border-stone-800 flex items-center justify-between z-10 shrink-0">
+      <div 
+        className="p-3 bg-white/90 dark:bg-stone-900/90 border-b border-rose-100 dark:border-stone-800 flex items-center justify-between z-10 shrink-0"
+        style={headerStyle}
+      >
         <div className="flex items-center gap-2 min-w-0">
           <button 
             onClick={onBack}
@@ -933,6 +1014,23 @@ export default function ChatRoom({
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
+          {/* Search particular messages button */}
+          <button
+            onClick={() => {
+              setIsSearchActive(!isSearchActive);
+              if (isSearchActive) setSearchQuery('');
+            }}
+            className={`p-2 border rounded-xl transition-all cursor-pointer ${
+              isSearchActive 
+                ? 'bg-rose-100 dark:bg-stone-800 text-rose-500 border-rose-200 dark:border-stone-700 shadow-inner' 
+                : 'border-rose-100 dark:border-stone-800 hover:bg-rose-50 dark:hover:bg-stone-800 text-stone-500 dark:text-stone-300 bg-white dark:bg-stone-900'
+            }`}
+            title="Search Messages"
+            id="chat_search_btn"
+          >
+            <Search size={14} />
+          </button>
+
           {/* Quick Speak voice-dial button */}
           {onVoiceCall && (
             <button
@@ -965,6 +1063,51 @@ export default function ChatRoom({
         </div>
       </div>
 
+      {/* Elegant sliding search bar for E2E conversation search */}
+      <AnimatePresence>
+        {isSearchActive && (
+          <motion.div 
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="bg-white/95 dark:bg-stone-900/95 border-b border-rose-100 dark:border-stone-800 px-3.5 py-2 flex items-center gap-2 overflow-hidden z-20 shadow-xs"
+            id="chat_search_bar_container"
+          >
+            <div className="relative flex-1">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
+              <input
+                type="text"
+                placeholder="Search particular messages from conversation..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-8 pr-8 py-1.5 text-xs rounded-xl border border-rose-100 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-950/40 text-stone-700 dark:text-stone-300 focus:outline-none focus:ring-1 focus:ring-rose-400 focus:bg-white dark:focus:bg-stone-900 font-medium"
+                id="chat_search_input"
+                autoFocus
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-400 hover:text-stone-600 rounded-full cursor-pointer transition"
+                >
+                  <X size={10} />
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setIsSearchActive(false);
+                setSearchQuery('');
+              }}
+              className="text-[10px] text-rose-500 font-extrabold px-2.5 py-1.5 hover:bg-rose-50 dark:hover:bg-stone-800 rounded-lg transition shrink-0 uppercase tracking-wider bg-transparent"
+            >
+              Cancel
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Birthday reminder */}
       {user.partnerBirthday && (
         <div className="bg-pink-100/50 px-4 py-2 border-b border-rose-100/40 text-[11px] text-stone-600 font-medium text-center flex items-center justify-center gap-1 select-none">
@@ -977,8 +1120,10 @@ export default function ChatRoom({
         <div 
           ref={messagesContainerRef}
           onScroll={handleScroll}
-          className="flex-1 overflow-y-auto p-4 space-y-4 select-none scroll-smooth"
+          className="flex-1 overflow-y-auto p-4 space-y-4 select-none"
         >
+          {/* Mobile header spacer when header is fixed */}
+          <div className="h-[60px] shrink-0 md:hidden" />
         
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
@@ -988,8 +1133,18 @@ export default function ChatRoom({
               Every message, voice clip, and photo is private locally with your Love Key <strong>{user.loveKey}</strong>.
             </p>
           </div>
+        ) : isSearchActive && searchQuery.trim() && displayedMessages.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
+            <div className="w-14 h-14 rounded-full bg-stone-100 dark:bg-stone-900 border border-stone-200 dark:border-stone-850 flex items-center justify-center text-stone-400 shrink-0">
+              <Search size={22} />
+            </div>
+            <h4 className="font-serif font-bold text-stone-700 dark:text-stone-200 text-sm">No Matching Messages</h4>
+            <p className="text-[10px] text-stone-400 dark:text-stone-500 max-w-xs font-semibold leading-relaxed">
+              We couldn't find any E2E decrypted text messages matching <strong className="text-rose-500">"{searchQuery}"</strong> in your conversation history.
+            </p>
+          </div>
         ) : (
-          messages.map((msg, index) => {
+          displayedMessages.map((msg, index) => {
             const isMe = msg.senderId === user.id;
             const decryptedVal = decryptedCache[msg.id];
             const hasGif = decryptedVal && decryptedVal.startsWith('[GIF]:');
@@ -999,7 +1154,7 @@ export default function ChatRoom({
 
             // Dynamic date grouping to display separators while scrolling the chat (Issue 5)
             const currentMsgDate = new Date(msg.timestamp).toDateString();
-            const prevMsgDate = index > 0 ? new Date(messages[index - 1].timestamp).toDateString() : null;
+            const prevMsgDate = index > 0 ? new Date(displayedMessages[index - 1].timestamp).toDateString() : null;
             const showDateHeader = currentMsgDate !== prevMsgDate;
 
             return (
@@ -1059,7 +1214,13 @@ export default function ChatRoom({
                       onMouseMove={handleMessageSwipeMove}
                       onMouseUp={() => { handleTouchEnd(); handleMessageSwipeEnd(); }}
                       onMouseLeave={handleMessageSwipeEnd}
-                      onClick={() => setFocusedMessageId(focusedMessageId === msg.id ? null : msg.id)}
+                      onClick={() => {
+                        // User can react to message ONLY with long press. 
+                        // Clicking on an already focused bubble closes it, otherwise click does not open reactions.
+                        if (focusedMessageId === msg.id) {
+                          setFocusedMessageId(null);
+                        }
+                      }}
                       className={`px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed transition-all shadow-3xs relative cursor-pointer select-none ${
                         isMe 
                           ? 'bg-rose-100 text-stone-800 border-rose-200 dark:bg-rose-900/70 dark:text-rose-50 dark:border-rose-800 rounded-tr-none' 
@@ -1078,25 +1239,56 @@ export default function ChatRoom({
                       )}
                       {decryptedVal ? (
                         hasGif ? (
-                          <div className="rounded-xl overflow-hidden max-w-[180px]">
-                            <img src={gifUrl} alt="Romantic Sticker" className="w-full h-auto object-cover" />
+                          <div className="rounded-xl overflow-hidden max-w-[180px] relative min-h-[120px] bg-stone-100/60 dark:bg-stone-900/50">
+                            <img 
+                              src={gifUrl} 
+                              alt="Romantic Sticker" 
+                              className={`w-full h-auto object-cover transition-all duration-300 ${loadedImages[msg.id] ? 'opacity-100' : 'opacity-40'}`} 
+                              onLoad={() => setLoadedImages(prev => ({ ...prev, [msg.id]: true }))}
+                            />
                           </div>
                         ) : hasImg ? (
-                          <div className="relative group/img max-w-[210px] rounded-xl overflow-hidden shadow-sm">
-                            <img src={base64ImgSrc} alt="Shared Love Card" className="w-full h-auto object-cover max-h-48" />
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setZoomImgSrc(base64ImgSrc); }}
-                              className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 flex items-center justify-center text-white transition-opacity duration-150"
-                            >
-                              <ZoomIn size={18} />
-                            </button>
+                          <div className="relative group/img max-w-[210px] rounded-xl overflow-hidden shadow-sm min-h-[140px] bg-stone-100/60 dark:bg-stone-900/50">
+                            <img 
+                              src={base64ImgSrc} 
+                              alt="Shared Love Card" 
+                              className={`w-full h-auto object-cover max-h-48 transition-all duration-300 ${loadedImages[msg.id] ? 'opacity-100' : 'opacity-40'}`} 
+                              onLoad={() => setLoadedImages(prev => ({ ...prev, [msg.id]: true }))}
+                            />
+                            {loadedImages[msg.id] && (
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); setZoomImgSrc(base64ImgSrc); }}
+                                className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 flex items-center justify-center text-white transition-opacity duration-150"
+                              >
+                                <ZoomIn size={18} />
+                              </button>
+                            )}
                           </div>
                         ) : decryptedVal.startsWith('[VOICE_NOTE]:') ? (
                           <VoiceNotePlayer base64Audio={decryptedVal.replace('[VOICE_NOTE]:', '')} />
                         ) : decryptedVal.startsWith('[VIDEO_NOTE]:') ? (
                           <VideoNotePlayer base64Video={decryptedVal.replace('[VIDEO_NOTE]:', '')} />
                         ) : (
-                          <p className="break-words whitespace-pre-wrap">{decryptedVal}</p>
+                          (() => {
+                            if (!searchQuery || !searchQuery.trim()) {
+                              return <p className="break-words whitespace-pre-wrap">{decryptedVal}</p>;
+                            }
+                            const regex = new RegExp(`(${searchQuery.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')})`, 'gi');
+                            const parts = decryptedVal.split(regex);
+                            return (
+                              <p className="break-words whitespace-pre-wrap">
+                                {parts.map((p, i) => 
+                                  regex.test(p) ? (
+                                    <mark key={i} className="bg-yellow-200 dark:bg-amber-500/80 text-stone-900 border-b border-stone-800 font-bold px-0.5 rounded-sm">
+                                      {p}
+                                    </mark>
+                                  ) : (
+                                    p
+                                  )
+                                )}
+                              </p>
+                            );
+                          })()
                         )
                       ) : (
                         <span className="flex items-center gap-1 text-[10px] text-stone-400 animate-pulse">
@@ -1424,7 +1616,20 @@ export default function ChatRoom({
                 placeholder="Write a sweet private letter..."
                 value={inputText}
                 onChange={handleInputChange}
-                className="flex-1 px-4 py-2 text-xs rounded-xl border border-rose-100 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 focus:outline-none focus:ring-1 focus:ring-rose-400 focus:bg-white dark:focus:bg-stone-900 text-stone-700 dark:text-stone-100 font-medium"
+                onFocus={() => {
+                  setIsComposerFocused(true);
+                  if (typeof window !== 'undefined') {
+                    // Lock layout scrolling upon soft onscreen keyboards triggering
+                    setTimeout(() => {
+                      window.scrollTo(0, 0);
+                      document.body.scrollTop = 0;
+                    }, 50);
+                  }
+                }}
+                onBlur={() => {
+                  setIsComposerFocused(false);
+                }}
+                className="flex-1 px-4 py-2 text-base md:text-xs rounded-xl border border-rose-100 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 focus:outline-none focus:ring-1 focus:ring-rose-400 focus:bg-white dark:focus:bg-stone-900 text-stone-700 dark:text-stone-100 font-medium"
                 disabled={isEncrypting}
                 id="chat_input_field"
               />

@@ -28,6 +28,90 @@ const LOVE_LANG_NEEDS = [
   'Receiving Gifts'
 ];
 
+const PRESET_CITIES = [
+  { name: 'Custom Location', timezone: '5.5', weather: '' },
+  { name: 'India (New Delhi) 🇮🇳', timezone: '5.5', weather: '☀️ Pleasant, 27°C' },
+  { name: 'Nepal (Kathmandu) 🇳🇵', timezone: '5.75', weather: '🌤️ Scenic Hills, 22°C' },
+  { name: 'Bangladesh (Dhaka) 🇧🇩', timezone: '6', weather: '☁️ Warm Humid, 29°C' },
+  { name: 'Pakistan (Karachi) 🇵🇰', timezone: '5', weather: '☀️ Sunny Coastal, 31°C' },
+  { name: 'Sri Lanka (Colombo) 🇱🇰', timezone: '5.5', weather: '🌦️ Tropical Warm, 28°C' },
+  { name: 'Singapore (Singapore) 🇸🇬', timezone: '8', weather: '⛈️ Warm Showers, 30°C' },
+  { name: 'Japan (Tokyo) 🇯🇵', timezone: '9', weather: '🌸 Cool Spring, 20°C' },
+  { name: 'South Korea (Seoul) 🇰🇷', timezone: '9', weather: '☀️ Sunny & Clear, 19°C' },
+  { name: 'Indonesia (Jakarta) 🇮🇩', timezone: '7', weather: '☁️ Humid & Warm, 29°C' },
+  { name: 'Philippines (Manila) 🇵🇭', timezone: '8', weather: '☀️ Bright Skies, 31°C' },
+  { name: 'Vietnam (Hanoi) 🇻🇳', timezone: '7', weather: '🌦️ Light Rain, 24°C' },
+  { name: 'Thailand (Bangkok) 🇹🇭', timezone: '7', weather: '☀️ Hot & Humid, 33°C' },
+  { name: 'Saudi Arabia (Riyadh) 🇸🇦', timezone: '3', weather: '☀️ Clear & Desert Breeze, 35°C' },
+  { name: 'UAE (Dubai) 🇦🇪', timezone: '4', weather: '☀️ Hot & Clear, 36°C' },
+  { name: 'France (Paris) 🇫🇷', timezone: '1', weather: '☀️ Sunny, 22°C' },
+  { name: 'UK (London) 🇬🇧', timezone: '1', weather: '🌧️ Drizzling, 16°C' },
+  { name: 'USA (New York) 🇺🇸', timezone: '-5', weather: '⛅ Breezy, 19°C' }
+];
+
+const ALL_TIMEZONES = [
+  // West Coast / Americas
+  { value: '-8', label: 'USA (Pacific Time - PST) 🇺🇸' },
+  { value: '-7', label: 'USA (Mountain Time - MST) 🇺🇸' },
+  { value: '-6', label: 'USA (Central Time - CST) 🇺🇸' },
+  { value: '-5', label: 'USA (Eastern Time - EST) 🇺🇸' },
+  { value: '-3', label: 'Brazil (Brasilia) 🇧🇷' },
+  // Europe & Africa
+  { value: '0', label: 'UK (London - GMT) 🇬🇧' },
+  { value: '1', label: 'France (Paris - CET) 🇫🇷' },
+  { value: '2', label: 'Greece (Athens - EET) 🇬🇷' },
+  { value: '2', label: 'Turkey (Istanbul) 🇹🇷' },
+  // West Asia / Middle East
+  { value: '2', label: 'Israel (Jerusalem) 🇮🇱' },
+  { value: '2', label: 'Palestine (Gaza) 🇵🇸' },
+  { value: '2', label: 'Lebanon (Beirut) 🇱🇧' },
+  { value: '3', label: 'Saudi Arabia (Riyadh) 🇸🇦' },
+  { value: '3', label: 'Syria (Damascus) 🇸🇾' },
+  { value: '3', label: 'Jordan (Amman) 🇯🇴' },
+  { value: '3', label: 'Iraq (Baghdad) 🇮🇶' },
+  { value: '3', label: 'Kuwait (Kuwait City) 🇰🇼' },
+  { value: '3', label: 'Qatar (Doha) 🇶🇦' },
+  { value: '3.5', label: 'Iran (Tehran) 🇮🇷' },
+  { value: '4', label: 'UAE (Dubai) 🇦🇪' },
+  { value: '4', label: 'Oman (Muscat) 🇴🇲' },
+  { value: '4.5', label: 'Afghanistan (Kabul) 🇦🇫' },
+  // Central & South Asia
+  { value: '5', label: 'Pakistan (Karachi/Islamabad) 🇵🇰' },
+  { value: '5', label: 'Uzbekistan (Tashkent) 🇺🇿' },
+  { value: '5', label: 'Tajikistan (Dushanbe) 🇹🇯' },
+  { value: '5', label: 'Turkmenistan (Ashgabat) 🇹🇲' },
+  { value: '5', label: 'Maldives (Male) 🇲🇻' },
+  { value: '5.5', label: 'India (New Delhi) 🇮🇳' },
+  { value: '5.5', label: 'Sri Lanka (Colombo) 🇱🇰' },
+  { value: '5.75', label: 'Nepal (Kathmandu) 🇳🇵' },
+  { value: '6', label: 'Bangladesh (Dhaka) 🇧🇩' },
+  { value: '6', label: 'Bhutan (Thimphu) 🇧🇹' },
+  { value: '6', label: 'Kazakhstan (Astana/Almaty) 🇰🇿' },
+  { value: '6', label: 'Kyrgyzstan (Bishkek) 🇰🇬' },
+  // Southeast Asia
+  { value: '6.5', label: 'Myanmar (Yangon) 🇲🇲' },
+  { value: '7', label: 'Thailand (Bangkok) 🇹🇭' },
+  { value: '7', label: 'Vietnam (Hanoi) 🇻🇳' },
+  { value: '7', label: 'Cambodia (Phnom Penh) 🇰🇭' },
+  { value: '7', label: 'Laos (Vientiane) 🇱🇦' },
+  { value: '7', label: 'Indonesia (Jakarta) 🇮🇩' },
+  { value: '8', label: 'Singapore (Singapore) 🇸🇬' },
+  { value: '8', label: 'Malaysia (Kuala Lumpur) 🇲🇾' },
+  { value: '8', label: 'Philippines (Manila) 🇵🇭' },
+  { value: '8', label: 'Brunei (Bandar Seri Begawan) 🇧🇳' },
+  { value: '8', label: 'East Timor/Timor-Leste (Dili) 🇹🇱' },
+  // East Asia
+  { value: '8', label: 'China (Beijing) 🇨🇳' },
+  { value: '8', label: 'Taiwan (Taipei) 🇹🇼' },
+  { value: '8', label: 'Hong Kong 🇭🇰' },
+  { value: '8', label: 'Mongolia (Ulaanbaatar) 🇲🇳' },
+  { value: '9', label: 'Japan (Tokyo) 🇯🇵' },
+  { value: '9', label: 'South Korea (Seoul) 🇰🇷' },
+  // Oceania
+  { value: '9.5', label: 'Australia (Adelaide) 🇦🇺' },
+  { value: '10', label: 'Australia (Sydney) 🇦🇺' },
+];
+
 interface HomeDashboardProps {
   user: User;
   stats: {
@@ -163,7 +247,11 @@ export default function HomeDashboard({
       const d = new Date();
       const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
       const nd = new Date(utc + (3600000 * offset));
-      return nd.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ` (GMT${offset >= 0 ? '+' : ''}${offset})`;
+      const formattedTime = nd.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      
+      const match = ALL_TIMEZONES.find(t => t.value === offsetStr);
+      const namePart = match ? match.label : `GMT${offset >= 0 ? '+' : ''}${offset}`;
+      return `${formattedTime} (${namePart})`;
     } catch {
       return '⌛';
     }
@@ -226,11 +314,21 @@ export default function HomeDashboard({
   const [appThemeInput, setAppThemeInput] = useState<'light' | 'dark' | 'auto'>(user.appTheme || 'light');
   const [showSettingsModal, setShowSettingsModal] = useState(false);
 
+  // Synchronize state only when modals actually open to prevent draft overwriting on background user stream events
   useEffect(() => {
-    setCityInput(user.locationCity || '');
-    setCustomChatBgInput(user.chatBackground || '');
-    setAppThemeInput(user.appTheme || 'light');
-  }, [user]);
+    if (showLocationEditor) {
+      setCityInput(user.locationCity || '');
+      setTimezoneInput(user.locationTimezone || '5.5');
+      setWeatherInput(user.locationWeather || '');
+    }
+  }, [showLocationEditor, user.locationCity, user.locationTimezone, user.locationWeather]);
+
+  useEffect(() => {
+    if (showSettingsModal) {
+      setCustomChatBgInput(user.chatBackground || '');
+      setAppThemeInput(user.appTheme || 'light');
+    }
+  }, [showSettingsModal, user.chatBackground, user.appTheme]);
 
   const handleSaveSettings = async () => {
     try {
@@ -375,8 +473,13 @@ export default function HomeDashboard({
                   ].map(preset => (
                     <button
                       key={preset.label}
+                      type="button"
                       onClick={() => setCustomChatBgInput(preset.val)}
-                      className="px-3 py-1.5 rounded-lg text-[10px] font-semibold border border-stone-200 dark:border-stone-700 hover:border-rose-500 dark:hover:border-rose-500 whitespace-nowrap dark:text-stone-300"
+                      className={`px-3 py-1.5 rounded-lg text-[10px] font-semibold border whitespace-nowrap transition-all ${
+                        customChatBgInput === preset.val
+                          ? 'border-rose-500 bg-rose-50/60 text-rose-600 dark:border-rose-500 dark:bg-rose-950/20 dark:text-rose-300 ring-2 ring-rose-300/25'
+                          : 'border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300 hover:border-rose-450 dark:hover:border-rose-450'
+                      }`}
                     >
                       {preset.label}
                     </button>
@@ -623,6 +726,30 @@ export default function HomeDashboard({
           {showLocationEditor && (
             <div className="bg-rose-50/70 dark:bg-stone-800/50 p-4 rounded-3xl border border-rose-200/50 dark:border-stone-700/50 mb-4 text-xs space-y-3">
               <h5 className="font-bold text-stone-700 dark:text-stone-200">Configure Your Location Settings</h5>
+              
+              <div>
+                <label className="text-[9px] font-bold text-stone-500 uppercase block mb-1">Quick Select World City</label>
+                <select
+                  className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-rose-200 dark:border-stone-700 bg-white dark:bg-stone-850 text-stone-900 dark:text-stone-100 font-bold"
+                  onChange={(e) => {
+                    const presetName = e.target.value;
+                    const found = PRESET_CITIES.find(c => c.name === presetName);
+                    if (found && presetName !== 'Custom Location') {
+                      setCityInput(found.name);
+                      setTimezoneInput(found.timezone);
+                      setWeatherInput(found.weather);
+                    }
+                  }}
+                  defaultValue="Custom Location"
+                >
+                  {PRESET_CITIES.map((cityOpt) => (
+                    <option key={cityOpt.name} value={cityOpt.name}>
+                      {cityOpt.name === 'Custom Location' ? '✨ Set Custom Location' : `${cityOpt.name} (GMT${Number(cityOpt.timezone) >= 0 ? '+' : ''}${cityOpt.timezone})`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-[9px] font-bold text-stone-500 uppercase">Your City</label>
@@ -639,16 +766,13 @@ export default function HomeDashboard({
                   <select 
                     value={timezoneInput}
                     onChange={(e) => setTimezoneInput(e.target.value)}
-                    className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100"
+                    className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 font-medium"
                   >
-                    <option value="-8">GMT-8 (PST)</option>
-                    <option value="-5">GMT-5 (EST)</option>
-                    <option value="0">GMT+0 (BST)</option>
-                    <option value="1">GMT+1 (CET)</option>
-                    <option value="2">GMT+2 (EET)</option>
-                    <option value="5.5">GMT+5.5 (IST)</option>
-                    <option value="8">GMT+8 (SGT)</option>
-                    <option value="9">GMT+9 (JST)</option>
+                    {ALL_TIMEZONES.map((tz, idx) => (
+                      <option key={`${tz.value}-${tz.label}-${idx}`} value={tz.value}>
+                        {tz.label} (GMT{Number(tz.value) >= 0 ? '+' : ''}{tz.value})
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>

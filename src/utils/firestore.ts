@@ -10,7 +10,10 @@ import {
   setDoc, 
   deleteDoc, 
   query, 
-  where 
+  where,
+  limit,
+  orderBy,
+  increment as firestoreIncrement
 } from 'firebase/firestore';
 import fs from 'fs';
 import path from 'path';
@@ -21,13 +24,19 @@ import {
   DailyAnswer, JournalEntry, BucketItem 
 } from '../types';
 
-import firebaseConfig from '../../firebase-applet-config.json';
+const firebaseConfigPath = path.join(process.cwd(), 'firebase-applet-config.json');
+const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, 'utf-8'));
 
 const app = initializeApp(firebaseConfig);
-export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
-  ignoreUndefinedProperties: true
-});
+export const db = firebaseConfig.firestoreDatabaseId
+  ? initializeFirestore(app, {
+      experimentalForceLongPolling: true,
+      ignoreUndefinedProperties: true
+    }, firebaseConfig.firestoreDatabaseId)
+  : initializeFirestore(app, {
+      experimentalForceLongPolling: true,
+      ignoreUndefinedProperties: true
+    });
 
 async function testConnection() {
   try {
@@ -80,15 +89,52 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 // Core Firestore CRUD Helpers
 // -------------------------------------------------------------
 
-export async function getCollection<T>(collectionName: string): Promise<T[]> {
+export async function getRecord<T>(collectionName: string, id: string): Promise<T | null> {
+  try {
+    const docRef = doc(db, collectionName, id);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return { id: snap.id, ...snap.data() } as T;
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `${collectionName}/${id}`);
+  }
+}
+
+export async function collectionExists(collectionName: string): Promise<boolean> {
   try {
     const colRef = collection(db, collectionName);
-    const snap = await getDocs(colRef);
+    const q = query(colRef, limit(1));
+    const snap = await getDocs(q);
+    return !snap.empty;
+  } catch (error) {
+    console.error(`[Firestore] Failed to check existence of ${collectionName}:`, error);
+    return false;
+  }
+}
+
+export async function getCollection<T>(collectionName: string, limitConstraint?: number, orderField?: string): Promise<T[]> {
+  try {
+    const colRef = collection(db, collectionName);
+    let q = query(colRef);
+    
+    if (orderField) {
+      q = query(q, orderBy(orderField, 'desc'));
+    }
+    
+    if (limitConstraint) {
+      q = query(q, limit(limitConstraint));
+    }
+    
+    const snap = await getDocs(q);
     return snap.docs.map(d => ({ id: d.id, ...d.data() }) as T);
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, collectionName);
   }
 }
+
+export const increment = firestoreIncrement;
 
 export async function addRecord<T extends { id: string }>(collectionName: string, item: T): Promise<T> {
   try {
@@ -127,24 +173,30 @@ export async function deleteRecord(collectionName: string, id: string): Promise<
 
 export async function migrateLocalDbToFirestore() {
   console.log('[Migration] Checking if Firestore database requires local sync...');
-  const DB_FILE = path.join(process.cwd(), 'data', 'db.json');
+  const DATA_DIR = path.join(process.cwd(), 'data');
+  const DB_FILE = path.join(DATA_DIR, 'db.json');
+  const INIT_MARKER = path.join(DATA_DIR, '.initialized');
+
   if (!fs.existsSync(DB_FILE)) {
     console.log('[Migration] No local db.json file detected to sync.');
     return;
   }
 
   try {
+    // 1. Check if the database has already been initialized via marker
+    if (fs.existsSync(INIT_MARKER)) {
+      console.log('[Migration] Initialization marker exists. Skipping full migration check.');
+      return;
+    }
+
     const localData = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
     
-    // Check if remote users collection has data. If it has data, don't overwrite blindly
-    const remoteUsers = await getCollection<User>('users');
-    const INIT_MARKER = path.join(process.cwd(), 'data', '.initialized');
+    // 2. Efficiently check if Firestore has data (don't read the whole collection)
+    const hasData = await collectionExists('users');
 
-    if (remoteUsers.length > 0) {
-      console.log('[Migration] Remote Firestore database has current data. Skipping seeding.');
-      if (!fs.existsSync(INIT_MARKER)) {
-        fs.writeFileSync(INIT_MARKER, 'true', 'utf-8');
-      }
+    if (hasData) {
+      console.log('[Migration] Remote Firestore database already has data. Skipping seeding.');
+      fs.writeFileSync(INIT_MARKER, 'true', 'utf-8');
       return;
     }
 

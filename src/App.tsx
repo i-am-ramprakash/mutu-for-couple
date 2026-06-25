@@ -12,10 +12,15 @@ import {
   DailyAnswer, JournalEntry, MovieState, WSEvent, BucketItem, MessageReaction
 } from './types';
 
+import { SignallingClient } from '@metered-ca/realtime';
+
 import { 
   playSweetMessageSound, playSweetSparkSound, playSweetHeartbeat, 
   playSweetLullaby, playBirdChirp 
 } from './utils/audio';
+import { AmbientSynth } from './utils/synth';
+import { useMuTuSocket } from './hooks/useMuTuSocket';
+import { useWebRTC } from './hooks/useWebRTC';
 
 import RelationshipAnalytics from './components/RelationshipAnalytics';
 import RelationshipTimeline from './components/RelationshipTimeline';
@@ -39,106 +44,12 @@ import UserProfile from './components/UserProfile';
 import CallDiagnostics from './components/CallDiagnostics';
 import { useTheme } from './ThemeContext';
 import { db } from './lib/firebase';
-import { collection, query, where, onSnapshot, doc, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, limit, orderBy } from 'firebase/firestore';
 
 const isImageString = (src: string | undefined | null): boolean => {
   if (!src) return false;
   return src.startsWith('data:') || src.startsWith('http://') || src.startsWith('https://') || src.startsWith('/') || src.length > 20;
 };
-
-// Premium Web Audio API Polyphonic Sleep Synthesizer Drone
-class AmbientSynth {
-  private ctx: AudioContext | null = null;
-  private oscillators: OscillatorNode[] = [];
-  private gainNode: GainNode | null = null;
-  private lfo: OscillatorNode | null = null;
-  public isMuted: boolean = false;
-
-  start() {
-    try {
-      if (this.ctx) return;
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContextClass) return;
-      
-      this.ctx = new AudioContextClass();
-      this.gainNode = this.ctx.createGain();
-      this.gainNode.gain.setValueAtTime(0, this.ctx.currentTime);
-      // Soft ambient loop fade in ramp
-      this.gainNode.gain.linearRampToValueAtTime(this.isMuted ? 0 : 0.08, this.ctx.currentTime + 3);
-
-      // Warm low-pass filter
-      const filter = this.ctx.createBiquadFilter();
-      filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(260, this.ctx.currentTime);
-      filter.Q.setValueAtTime(4, this.ctx.currentTime);
-
-      // Warm celestial drone chords (F# Major 9 / Bb maj chords notes)
-      const droneFreqs = [116.54, 174.61, 233.08, 293.66, 349.23];
-      droneFreqs.forEach((freq, idx) => {
-        if (!this.ctx) return;
-        const osc = this.ctx.createOscillator();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
-        // Add slightly detuned warmth chorus
-        osc.detune.setValueAtTime((idx % 2 === 0 ? 8 : -8), this.ctx.currentTime);
-        osc.connect(filter);
-        this.oscillators.push(osc);
-        osc.start();
-      });
-
-      // Ultra slow breathing sweep LFO
-      this.lfo = this.ctx.createOscillator();
-      this.lfo.type = 'sine';
-      this.lfo.frequency.setValueAtTime(0.06, this.ctx.currentTime); // 16 seconds complete cycle
-
-      const lfoGain = this.ctx.createGain();
-      lfoGain.gain.setValueAtTime(70, this.ctx.currentTime);
-
-      this.lfo.connect(lfoGain);
-      lfoGain.connect(filter.frequency);
-      this.lfo.start();
-
-      filter.connect(this.gainNode);
-      this.gainNode.connect(this.ctx.destination);
-    } catch (e) {
-      console.warn('Synthesizer blocked by autoplay policy or browser lack: ', e);
-    }
-  }
-
-  setMute(mute: boolean) {
-    this.isMuted = mute;
-    if (this.gainNode && this.ctx) {
-      try {
-        const targetValue = mute ? 0 : 0.08;
-        this.gainNode.gain.setValueAtTime(this.gainNode.gain.value, this.ctx.currentTime);
-        this.gainNode.gain.linearRampToValueAtTime(targetValue, this.ctx.currentTime + 1.2);
-      } catch (err) {}
-    }
-  }
-
-  stop() {
-    const list = this.oscillators;
-    const l = this.lfo;
-    const c = this.ctx;
-    
-    this.oscillators = [];
-    this.lfo = null;
-    this.ctx = null;
-    this.gainNode = null;
-
-    setTimeout(() => {
-      list.forEach(o => {
-        try { o.stop(); } catch (err) {}
-      });
-      if (l) {
-        try { l.stop(); } catch (err) {}
-      }
-      if (c) {
-        try { c.close(); } catch (err) {}
-      }
-    }, 1500);
-  }
-}
 
 export default function App() {
   const { theme, setTheme } = useTheme();
@@ -241,7 +152,7 @@ export default function App() {
     syncRouteFromPath();
     window.addEventListener('popstate', syncRouteFromPath);
     return () => window.removeEventListener('popstate', syncRouteFromPath);
-  }, [currentUser]);
+  }, []);
 
   const [viewportHeight, setViewportHeight] = useState<number | null>(null);
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
@@ -383,15 +294,36 @@ export default function App() {
   const [stats, setStats] = useState({ messagesCount: 0, memoriesCount: 0, journalCount: 0, answerCount: 0 });
 
   // WebRTC & Call states
-  const [callActive, setCallActive] = useState(false);
   const [callDuration, setCallDuration] = useState<number>(0);
-  const [incomingCall, setIncomingCall] = useState(false);
   const [ringingRole, setRingingRole] = useState<'caller' | 'callee' | null>(null);
   const [callType, setCallType] = useState<'voice' | 'video'>('video');
   const [calleeName, setCalleeName] = useState('');
   const [showCallDiagnostics, setShowCallDiagnostics] = useState(false);
   const [webrtcIceState, setWebrtcIceState] = useState('new');
   const [webrtcSignalingState, setWebrtcSignalingState] = useState('stable');
+
+  const [isSleepMode, setIsSleepMode] = useState(false);
+  const [sleepSynthMuted, setSleepSynthMuted] = useState(false);
+  const [receivedSleepSpark, setReceivedSleepSpark] = useState(false);
+  const [partnerThumbKissActive, setPartnerThumbKissActive] = useState(false);
+  const [movieSyncState, setMovieSyncState] = useState<MovieState | null>(null);
+  const [typingPartner, setTypingPartner] = useState(false);
+
+  const { sendMessage } = useMuTuSocket(currentUser, (payload) => {
+    // @ts-ignore
+    if (typeof handleIncomingWSEvent === 'function') {
+      // @ts-ignore
+      handleIncomingWSEvent(payload);
+    }
+  });
+
+  const { 
+    callActive, setCallActive, 
+    incomingCall, setIncomingCall, 
+    localStream, setLocalStream, 
+    remoteStream, setRemoteStream, 
+    startCall, endCall 
+  } = useWebRTC(currentUser, sendMessage);
 
   // Call duration counter timer effect
   useEffect(() => {
@@ -410,8 +342,6 @@ export default function App() {
   }, [callActive]);
   
   // Audio/Video streams state
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [micMuted, setMicMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
   const [remoteStreamActive, setRemoteStreamActive] = useState(false);
@@ -464,19 +394,10 @@ export default function App() {
     };
   }, [remoteStream]);
 
-  // Sleep mode states
-  const [isSleepMode, setIsSleepMode] = useState(false);
-  const [sleepSynthMuted, setSleepSynthMuted] = useState(false);
-  const [receivedSleepSpark, setReceivedSleepSpark] = useState(false);
+  // Re-instating missing refs used by the legacy WebRTC and Socket logic in App.tsx
   const synthRef = useRef<AmbientSynth | null>(null);
-
-  // WebSocket reference
   const socketRef = useRef<WebSocket | null>(null);
-  const [typingPartner, setTypingPartner] = useState(false);
-  const [partnerThumbKissActive, setPartnerThumbKissActive] = useState(false);
-  const [movieSyncState, setMovieSyncState] = useState<MovieState | null>(null);
 
-  // Video stream elements reference
   const myVideoRef = useRef<HTMLVideoElement>(null);
   const partnerVideoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -485,6 +406,19 @@ export default function App() {
   const callTypeRef = useRef<'voice' | 'video'>('video');
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const iceCandidatesQueueRef = useRef<any[]>([]);
+  const meteredSignallingRef = useRef<SignallingClient | null>(null);
+  const iceServersRef = useRef<any[]>([]);
+
+  // Sync refs with state for legacy logic compatibility
+  useEffect(() => { localStreamRef.current = localStream; }, [localStream]);
+  useEffect(() => { remoteStreamRef.current = remoteStream; }, [remoteStream]);
+  useEffect(() => { callTypeRef.current = callType; }, [callType]);
+
+  // User session reference for stable callback closures
+  const userRef = useRef(currentUser);
+  useEffect(() => {
+    userRef.current = currentUser;
+  }, [currentUser]);
 
   // Auto-binding effects for both local feedback and remote media players
   useEffect(() => {
@@ -629,29 +563,38 @@ export default function App() {
     return `${days}d ago`;
   }, []);
 
-  // 1. Initial State Loaders (REST calls)
+  // 1. Initial State Loaders (REST calls with resilient fallback loops)
   const fetchAllData = useCallback(async (user: User) => {
     if (!user.coupleId) return;
-    try {
-      // Parallel REST Queries
-      const [msgRes, memRes, calRes, qnrRes, jrnRes, statsRes, bktRes] = await Promise.all([
-        fetch(`/api/messages?coupleId=${user.coupleId}`),
-        fetch(`/api/memories?coupleId=${user.coupleId}`),
-        fetch(`/api/calendar?coupleId=${user.coupleId}`),
-        fetch(`/api/daily-question`),
-        fetch(`/api/journal?coupleId=${user.coupleId}`),
-        fetch(`/api/stats?coupleId=${user.coupleId}&userId=${user.id}`),
-        fetch(`/api/bucket-list?coupleId=${user.coupleId}`)
-      ]);
+    
+    const fetchSafe = async (url: string, fallback: any, retries = 8, delay = 1500) => {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const res = await fetch(url);
+          if (res.ok) {
+            return await res.json();
+          }
+          console.warn(`Resilient fetch warning for [${url}]: Status ${res.status} (attempt ${i + 1}/${retries})`);
+        } catch (err) {
+          console.warn(`Resilient fetch attempt ${i + 1}/${retries} failed for [${url}]:`, err instanceof Error ? err.message : String(err));
+        }
+        if (i < retries - 1) {
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+      return fallback;
+    };
 
+    try {
+      // Parallel REST Queries with bulletproof resilience
       const [msgs, mems, cals, quest, journals, statsData, bkts] = await Promise.all([
-        msgRes.json(),
-        memRes.json(),
-        calRes.json(),
-        qnrRes.json(),
-        jrnRes.json(),
-        statsRes.json(),
-        bktRes.json()
+        fetchSafe(`/api/messages?coupleId=${user.coupleId}`, []),
+        fetchSafe(`/api/memories?coupleId=${user.coupleId}`, []),
+        fetchSafe(`/api/calendar?coupleId=${user.coupleId}`, []),
+        fetchSafe(`/api/daily-question`, null),
+        fetchSafe(`/api/journal?coupleId=${user.coupleId}`, []),
+        fetchSafe(`/api/stats?coupleId=${user.coupleId}&userId=${user.id}`, { messagesCount: 0, memoriesCount: 0, journalCount: 0, answerCount: 0 }),
+        fetchSafe(`/api/bucket-list?coupleId=${user.coupleId}`, [])
       ]);
 
       setMessages(msgs);
@@ -664,23 +607,23 @@ export default function App() {
 
       // Pull daily answers for this question
       if (quest?.id) {
-        const ansRes = await fetch(`/api/daily-answers?coupleId=${user.coupleId}&questionId=${quest.id}`);
-        const answers = await ansRes.json();
+        const answers = await fetchSafe(`/api/daily-answers?coupleId=${user.coupleId}&questionId=${quest.id}`, []);
         setDailyAnswers(answers);
       }
     } catch (err) {
-      console.error('Core restful hydration failed:', err);
+      console.warn('Core restful hydration failed:', err);
     }
   }, []);
 
   // Sync user profile state from server (checking pairings)
   const handleRefreshUser = useCallback(async () => {
-    if (!currentUser) return;
+    const user = userRef.current;
+    if (!user) return;
     try {
       const res = await fetch(`/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: currentUser.email })
+        body: JSON.stringify({ email: user.email })
       });
       if (res.ok) {
         const freshUser = await res.json();
@@ -692,14 +635,296 @@ export default function App() {
         localStorage.removeItem('mutu_user_session');
       }
     } catch (err) {
-      console.error('Error refreshing session details:', err);
+      console.warn('Error refreshing session details:', err);
     }
-  }, [currentUser?.email, currentUser]);
+  }, []);
 
   // Verify cached user session on mount
   useEffect(() => {
     if (currentUser) {
       handleRefreshUser();
+    }
+  }, []);
+
+  // Outbound real-time event dispatcher
+  const sendRealTimeEvent = useCallback((event: WSEvent): boolean => {
+    let sent = false;
+
+    // Stamp our sender identifier onto the event object
+    const decoratedEvent = { ...event, senderUserId: currentUser?.id };
+
+    // 1. Dispatch through Premium Metered Realtime Messaging if active and ready
+    if (meteredSignallingRef.current && meteredSignallingRef.current.state === 'connected' && currentUser?.coupleId) {
+      try {
+        const channelName = `couple_${currentUser.coupleId}`;
+        meteredSignallingRef.current.publish(channelName, decoratedEvent);
+        sent = true;
+        console.log('[Metered Realtime] Published real-time signal:', event.type);
+      } catch (err) {
+        console.warn('[Metered Realtime] Failed to dispatch real-time pub/sub:', err);
+      }
+    }
+
+    // 2. Dispatch through standard Local WebSocket as parallel helper
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      try {
+        socketRef.current.send(JSON.stringify(decoratedEvent));
+        sent = true;
+        console.log('[WebRTC/WS] Standard WebSocket dispatch success:', event.type);
+      } catch (err) {
+        console.warn('[WebRTC/WS] Parallel standard WS dispatch unsuccessful:', err);
+      }
+    }
+
+    return sent;
+  }, [currentUser?.id]);
+
+  const reconnectCall = async () => {
+    try {
+      const pc = peerConnectionRef.current;
+      if (!pc || pc.connectionState === 'closed') {
+        console.warn('[WebRTC] Reconnection triggered but RTCPeerConnection is inactive or closed.');
+        return;
+      }
+
+      console.log('[WebRTC] Automated reconnection initiated...');
+      
+      // Perform local ICE restart first if supported
+      if (typeof pc.restartIce === 'function') {
+        try {
+          console.log('[WebRTC] Calling pc.restartIce() to request new ICE generation.');
+          pc.restartIce();
+        } catch (e) {
+          console.warn('[WebRTC] pc.restartIce() got exception, proceeding with standard iceRestart offer:', e);
+        }
+      }
+
+      // Generate a fresh offer requesting ICE restart
+      const offer = await pc.createOffer({ iceRestart: true });
+      await pc.setLocalDescription(offer);
+
+      // Clear the local ICE candidate queue for a fresh start so candidates don't bleed between sessions
+      iceCandidatesQueueRef.current = [];
+
+      if (currentUser?.partnerId) {
+        console.log('[WebRTC] Broadcasting fresh iceRestart SDP offer to partner:', currentUser.partnerId);
+        sendRealTimeEvent({
+          type: 'call:sdp-offer',
+          sdp: offer,
+          targetId: currentUser.partnerId
+        });
+      }
+    } catch (err) {
+      console.error('[WebRTC] Automated reconnection flow failed:', err);
+    }
+  };
+
+  const createPeerConnection = useCallback((stream: MediaStream | null) => {
+    // We design the ICE candidate queues to persist during initialization to avoid race events
+    console.log('[WebRTC] Creating RTCPeerConnection, current candidate queue size:', iceCandidatesQueueRef.current.length);
+
+    const defaultIceServers = iceServersRef.current.length > 0
+      ? [...iceServersRef.current]
+      : [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+          { urls: 'stun:stun3.l.google.com:19302' },
+          { urls: 'stun:stun4.l.google.com:19302' },
+          { urls: 'stun:global.stun.twilio.com:3478' }
+        ];
+
+    const pc = new RTCPeerConnection({
+      iceServers: defaultIceServers,
+      iceCandidatePoolSize: 10
+    });
+
+    peerConnectionRef.current = pc;
+
+    pc.onicecandidate = (event) => {
+      const user = userRef.current;
+      if (event.candidate && user?.partnerId) {
+        sendRealTimeEvent({
+          type: 'call:ice-candidate',
+          candidate: event.candidate,
+          targetId: user.partnerId
+        });
+      }
+    };
+
+    pc.ontrack = (event) => {
+      if (!remoteStreamRef.current) {
+        remoteStreamRef.current = new MediaStream();
+      }
+      const alreadyHasTrack = remoteStreamRef.current.getTracks().some(t => t.id === event.track.id);
+      if (!alreadyHasTrack) {
+        remoteStreamRef.current.addTrack(event.track);
+      }
+      const compositeStream = new MediaStream(remoteStreamRef.current.getTracks());
+      setRemoteStream(compositeStream);
+      setRemoteStreamActive(true);
+    };
+
+    return pc;
+  }, [sendRealTimeEvent]);
+
+  const drainIceCandidatesQueue = useCallback(async () => {
+    try {
+      const pc = peerConnectionRef.current;
+      if (pc && pc.remoteDescription && pc.remoteDescription.type) {
+        const candidates = [...iceCandidatesQueueRef.current];
+        iceCandidatesQueueRef.current = [];
+        for (const candidate of candidates) {
+          if (candidate) await pc.addIceCandidate(candidate);
+        }
+      }
+    } catch (err) {
+      console.error('[WebRTC] Failed to drain ICE candidates queue:', err);
+    }
+  }, []);
+
+  // Minor isolated data refreshers supporting WebSocket notifications
+  const fetchMemories = useCallback(async () => {
+    if (!currentUser?.coupleId) return;
+    try {
+      const res = await fetch(`/api/memories?coupleId=${currentUser.coupleId}`);
+      if (res.ok) {
+        setMemories(await res.json());
+      }
+    } catch (err) {
+      console.warn('Silent fallback for memory fetch:', err);
+    }
+  }, [currentUser?.coupleId]);
+
+  const fetchCalendar = useCallback(async () => {
+    if (!currentUser?.coupleId) return;
+    try {
+      const res = await fetch(`/api/calendar?coupleId=${currentUser.coupleId}`);
+      if (res.ok) {
+        setCalendarEvents(await res.json());
+      }
+    } catch (err) {
+      console.warn('Silent fallback for calendar fetch:', err);
+    }
+  }, [currentUser?.coupleId]);
+
+  const fetchJournal = useCallback(async () => {
+    if (!currentUser?.coupleId) return;
+    try {
+      const res = await fetch(`/api/journal?coupleId=${currentUser.coupleId}`);
+      if (res.ok) {
+        setJournalEntries(await res.json());
+      }
+    } catch (err) {
+      console.warn('Silent fallback for journal fetch:', err);
+    }
+  }, [currentUser?.coupleId]);
+
+  const fetchBucketList = useCallback(async () => {
+    if (!currentUser?.coupleId) return;
+    try {
+      const res = await fetch(`/api/bucket-list?coupleId=${currentUser.coupleId}`);
+      if (res.ok) {
+        setBucketItems(await res.json());
+      }
+    } catch (err) {
+      console.warn('Silent fallback for bucket list fetch:', err);
+    }
+  }, [currentUser?.coupleId]);
+
+  const fetchAnswersOnly = useCallback(async () => {
+    if (!currentUser?.coupleId || !dailyQuestion?.id) return;
+    try {
+      const res = await fetch(`/api/daily-answers?coupleId=${currentUser.coupleId}&questionId=${dailyQuestion.id}`);
+      if (res.ok) {
+        setDailyAnswers(await res.json());
+      }
+    } catch (err) {
+      console.warn('Silent fallback for daily answers fetch:', err);
+    }
+  }, [currentUser?.coupleId, dailyQuestion?.id]);
+
+  const fetchStatsAndAnswers = useCallback(async () => {
+    if (!currentUser?.coupleId) return;
+    try {
+      const res = await fetch(`/api/stats?coupleId=${currentUser.coupleId}&userId=${currentUser.id}`);
+      if (res.ok) {
+        setStats(await res.json());
+      }
+    } catch (err) {
+      console.warn('Silent fallback for stats fetch:', err);
+    }
+  }, [currentUser?.coupleId, currentUser?.id]);
+
+  const handleStartWebRTCOffer = useCallback(async () => {
+    try {
+      const pc = createPeerConnection(localStreamRef.current);
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      const user = userRef.current;
+      if (user?.partnerId) {
+        sendRealTimeEvent({
+          type: 'call:sdp-offer',
+          sdp: offer,
+          targetId: user.partnerId
+        });
+      }
+    } catch (err) {
+      console.error('[WebRTC] Offer generation failed:', err);
+    }
+  }, [createPeerConnection, sendRealTimeEvent]);
+
+  const handleReceiveWebRTCOffer = useCallback(async (sdp: any) => {
+    try {
+      let pc = peerConnectionRef.current;
+      if (!pc) {
+        pc = createPeerConnection(localStreamRef.current);
+      }
+      await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      await drainIceCandidatesQueue();
+
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      const user = userRef.current;
+      if (user?.partnerId) {
+        sendRealTimeEvent({
+          type: 'call:sdp-answer',
+          sdp: answer,
+          targetId: user.partnerId
+        });
+      }
+    } catch (err) {
+      console.error('Failed to handle SDP Offer:', err);
+    }
+  }, [createPeerConnection, drainIceCandidatesQueue, sendRealTimeEvent]);
+
+  const handleReceiveWebRTCAnswer = useCallback(async (sdp: any) => {
+    try {
+      const pc = peerConnectionRef.current;
+      if (pc) {
+        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        await drainIceCandidatesQueue();
+      }
+    } catch (err) {
+      console.error('Failed to handle SDP Answer:', err);
+    }
+  }, [drainIceCandidatesQueue]);
+
+  const handleReceiveIceCandidate = useCallback(async (candidate: any) => {
+    try {
+      if (!candidate) return;
+      const pc = peerConnectionRef.current;
+      if (pc && pc.remoteDescription && pc.remoteDescription.type) {
+        await pc.addIceCandidate(candidate);
+      } else {
+        // Queue candidates if connection or remote description has not been fully resolved yet
+        console.log('[WebRTC] Remote description not ready. Queueing candidate:', candidate);
+        iceCandidatesQueueRef.current.push(candidate);
+      }
+    } catch (err) {
+      console.error('[WebRTC] Failed to append ICE candidate directly:', err);
     }
   }, []);
 
@@ -713,14 +938,242 @@ export default function App() {
         localStorage.setItem(key, 'true');
       }
     }
-  }, [currentUser]);
+  }, [currentUser?.id]);
 
-  // 2. WebSocket setup handler (re-establishes on user or couple update)
+  // Load dynamic premium WebRTC TURN credentials from backend
   useEffect(() => {
-    if (!currentUser) {
+    const loadPremiumTurnCredentials = async () => {
+      try {
+        console.log('[WebRTC] Fetching dynamic premium TURN coordinates from backend...');
+        const res = await fetch('/api/metered/turn');
+        if (res.ok) {
+          const servers = await res.json();
+          if (Array.isArray(servers) && servers.length > 0) {
+            console.log('[WebRTC] Premium TURN credentials loaded successfully. Server count:', servers.length);
+            iceServersRef.current = servers;
+          }
+        }
+      } catch (err) {
+        console.warn('[WebRTC] Failed to fetch dynamic TURN credentials, falling back to openrelay community:', err);
+      }
+    };
+    if (currentUser?.id) {
+      loadPremiumTurnCredentials();
+    }
+  }, [currentUser?.id]);
+
+  const incomingCallRef = useRef(incomingCall);
+  useEffect(() => {
+    incomingCallRef.current = incomingCall;
+  }, [incomingCall]);
+
+  // Core real-time event routing processor (Stabilized with Ref to avoid identity-based reconnection loops)
+  const handleIncomingWSEvent = useCallback((payload: WSEvent) => {
+    const user = userRef.current;
+    if (!user) return;
+    console.log('[Realtime Routing] Dispatching inbound payload type:', payload.type);
+
+    switch (payload.type) {
+      case 'chat:message': {
+        setMessages((prev) => {
+          const exists = prev.some(m => m.id === payload.message.id);
+          if (exists) {
+            return prev.map(m => m.id === payload.message.id ? payload.message : m);
+          }
+          return [...prev, payload.message];
+        });
+        fetchStatsAndAnswers();
+        if (payload.message.senderId !== user.id) {
+          playSweetMessageSound();
+        }
+        break;
+      }
+
+      case 'chat:seen-update': {
+        setMessages((prev) => prev.map(m => {
+          if (m.senderId === user.id && !m.read) {
+            return { ...m, read: true, status: 'seen' };
+          }
+          return m;
+        }));
+        break;
+      }
+
+      case 'chat:typing': {
+        setTypingPartner(payload.isTyping);
+        break;
+      }
+
+      case 'chat:thumb-kiss-start': {
+        setPartnerThumbKissActive(true);
+        break;
+      }
+
+      case 'chat:thumb-kiss-end': {
+        setPartnerThumbKissActive(false);
+        break;
+      }
+
+      case 'chat:reaction': {
+        setMessages((prev) => prev.map(m => {
+          if (m.id === payload.messageId) {
+            let reactions = [...m.reactions];
+            if (payload.action === 'add') {
+              reactions = reactions.filter(r => r.userId !== payload.reaction.userId);
+              reactions.push(payload.reaction);
+              if (payload.reaction.userId !== user.id) {
+                playSweetSparkSound();
+                showPushNotification("✨ Message Reacted", `Partner reacted ${payload.reaction.emoji} to your letter.`, 'chat', 'chat');
+              }
+            } else {
+              reactions = reactions.filter(r => r.userId !== payload.reaction.userId);
+            }
+            return { ...m, reactions };
+          }
+          return m;
+        }));
+        break;
+      }
+
+      case 'movie:sync': {
+        setMovieSyncState(payload.state);
+        break;
+      }
+
+      case 'call:dial': {
+        setCallType(payload.mode);
+        callTypeRef.current = payload.mode;
+        setIncomingCall(true);
+        setRingingRole('callee');
+        playSweetSparkSound();
+        showPushNotification(
+          `📞 Incoming ${payload.mode === 'video' ? 'Video' : 'Voice'} Call`,
+          `${user?.partnerName || 'Your partner'} is calling you... 💖`,
+          'call',
+          'chat'
+        );
+        break;
+      }
+
+      case 'call:response': {
+        if (payload.action === 'accept') {
+          setIncomingCall(false);
+          setCallActive(true);
+          setRingingRole(null);
+          playBirdChirp();
+          handleStartWebRTCOffer();
+        } else {
+          cleanupCalling();
+        }
+        break;
+      }
+
+      case 'call:sdp-offer': {
+        handleReceiveWebRTCOffer(payload.sdp);
+        break;
+      }
+
+      case 'call:sdp-answer': {
+        handleReceiveWebRTCAnswer(payload.sdp);
+        break;
+      }
+
+      case 'call:ice-candidate': {
+        handleReceiveIceCandidate(payload.candidate);
+        break;
+      }
+
+      case 'call:hangup': {
+        const wasMissed = incomingCallRef.current;
+        cleanupCalling();
+        if (wasMissed) {
+          showPushNotification(
+            "☎️ Missed Call",
+            `You missed a call from ${user?.partnerName || 'your partner'}. 💘`,
+            'call',
+            'chat'
+          );
+        }
+        break;
+      }
+
+      case 'state:update': {
+        if (payload.section === 'memories') {
+          // fetchMemories(); // Optimized: Handled by Firestore onSnapshot
+          playSweetMessageSound();
+          showPushNotification("📸 Shared Polaroid", `${user.partnerName || 'Companion'} posted a new Polaroid to your Memory Wall! 🖼️`, 'memories', 'memories');
+        }
+        if (payload.section === 'calendar') {
+          // fetchCalendar(); // Optimized: Handled by Firestore onSnapshot
+          playSweetMessageSound();
+          showPushNotification("📅 Love hearth scheduled", `${user.partnerName || 'Companion'} scheduled a new event on your Shared Calendar.`, 'calendar', 'calendar');
+        }
+        if (payload.section === 'journal') {
+          // fetchJournal(); // Optimized: Handled by Firestore onSnapshot
+          playSweetMessageSound();
+          showPushNotification("📓 secret Diary page", `${user.partnerName || 'Companion'} wrote a new private journal page!`, 'journal', 'journal');
+        }
+        if (payload.section === 'daily') {
+          // fetchAnswersOnly(); // Optimized: Handled by Firestore onSnapshot
+          playSweetSparkSound();
+          showPushNotification("❓ Q&A Playroom", `${user.partnerName || 'Companion'} answered today's Question! Unlock to read. 🥰`, 'daily', 'daily');
+        }
+        if (payload.section === 'bucket') {
+          // fetchBucketList(); // Optimized: Handled by Firestore onSnapshot
+          playSweetSparkSound();
+          showPushNotification("🗺️ Bucket List Update", `${user.partnerName || 'Companion'} updated your Shared Adventure checklist!`, 'bucket', 'bucket');
+        }
+        if (payload.section === 'stats') {
+          fetchStatsAndAnswers(); // Keep this as stats are computed on server
+        }
+        if (payload.section === 'profile' || payload.section === 'presence') {
+          // handleRefreshUser(); // Optimized: Handled by Firestore onSnapshot
+        }
+        if (payload.section === 'sleep_on') {
+          setIsSleepMode(true);
+          playSweetLullaby();
+          showPushNotification("💤 Starry Sky Tucked", `${user.partnerName || 'Companion'} tucked themselves in sleep together.`, 'system', 'dashboard');
+        }
+        if (payload.section === 'sleep_off') {
+          setIsSleepMode(false);
+          playBirdChirp();
+          showPushNotification("🌅 Golden Good Morning", `${user.partnerName || 'Companion'} woke up. Good morning my love! 🌸`, 'system', 'dashboard');
+        }
+        if (payload.section === 'sleep_spark' as any) {
+          setReceivedSleepSpark(true);
+          playSweetSparkSound();
+          playSweetHeartbeat();
+          showPushNotification("💖 Sweet Touch Spark", `${user.partnerName || 'Companion'} sent you a cuddle spark! ✨`, 'system', 'dashboard');
+          setTimeout(() => setReceivedSleepSpark(false), 3500);
+        }
+        break;
+      }
+    }
+  }, [
+    fetchStatsAndAnswers, 
+    handleStartWebRTCOffer, 
+    handleReceiveWebRTCOffer, 
+    handleReceiveWebRTCAnswer, 
+    handleReceiveIceCandidate, 
+    fetchMemories, 
+    fetchCalendar, 
+    fetchJournal, 
+    fetchAnswersOnly, 
+    fetchBucketList, 
+    handleRefreshUser, 
+    showPushNotification
+  ]);
+
+  // 2. Real-time stream controllers (Dual WebSocket and Premium Metered Realtime Messaging channels)
+  useEffect(() => {
+    if (!currentUser?.id) {
       if (socketRef.current) {
         socketRef.current.close();
         socketRef.current = null;
+      }
+      if (meteredSignallingRef.current) {
+        meteredSignallingRef.current.close().catch(() => {});
+        meteredSignallingRef.current = null;
       }
       return;
     }
@@ -731,6 +1184,7 @@ export default function App() {
     let isDestroyed = false;
     let reconnectTimeout: any = null;
     let ws: WebSocket | null = null;
+    let meteredSignalling: SignallingClient | null = null;
 
     const connectSocket = () => {
       if (isDestroyed) return;
@@ -749,7 +1203,7 @@ export default function App() {
           ws?.close();
           return;
         }
-        console.log('MuTu Realtime channel fully open.');
+        console.log('MuTu WebSocket Realtime stream active.');
         // Notify server we are logged in so we can route packages
         ws?.send(JSON.stringify({
           type: 'connection:init',
@@ -757,7 +1211,7 @@ export default function App() {
           coupleId: currentUser.coupleId
         }));
 
-        // Automatically flush any offline failed messages!
+        // Automatically flush any offline failed messages
         setMessages((prev) => {
           const failedOnes = prev.filter(m => m.status === 'failed' && m.senderId === currentUser.id);
           if (failedOnes.length > 0) {
@@ -781,186 +1235,7 @@ export default function App() {
         if (isDestroyed) return;
         try {
           const payload: WSEvent = JSON.parse(event.data);
-          console.log('Incoming live payload event: ', payload.type);
-
-          switch (payload.type) {
-            case 'chat:message': {
-              setMessages((prev) => {
-                const exists = prev.some(m => m.id === payload.message.id);
-                if (exists) {
-                  return prev.map(m => m.id === payload.message.id ? payload.message : m);
-                }
-                return [...prev, payload.message];
-              });
-              fetchStatsAndAnswers();
-              if (payload.message.senderId !== currentUser.id) {
-                playSweetMessageSound();
-                // Under client request guidelines, we do not trigger top banner popup warnings on regular text messages
-                // Instead, the custom bottom bar and Lobby sections dynamically render numeric increasing indicators.
-              }
-              break;
-            }
-
-            case 'chat:seen-update': {
-              setMessages((prev) => prev.map(m => {
-                if (m.senderId === currentUser.id && !m.read) {
-                  return { ...m, read: true, status: 'seen' };
-                }
-                return m;
-              }));
-              break;
-            }
-
-            case 'chat:typing': {
-              setTypingPartner(payload.isTyping);
-              break;
-            }
-
-            case 'chat:thumb-kiss-start': {
-              setPartnerThumbKissActive(true);
-              break;
-            }
-
-            case 'chat:thumb-kiss-end': {
-              setPartnerThumbKissActive(false);
-              break;
-            }
-
-            case 'chat:reaction': {
-              setMessages((prev) => prev.map(m => {
-                if (m.id === payload.messageId) {
-                  let reactions = [...m.reactions];
-                  if (payload.action === 'add') {
-                    reactions = reactions.filter(r => r.userId !== payload.reaction.userId);
-                    reactions.push(payload.reaction);
-                    if (payload.reaction.userId !== currentUser.id) {
-                      playSweetSparkSound();
-                      showPushNotification("✨ Message Reacted", `Partner reacted ${payload.reaction.emoji} to your letter.`, 'chat', 'chat');
-                    }
-                  } else {
-                    reactions = reactions.filter(r => r.userId !== payload.reaction.userId);
-                  }
-                  return { ...m, reactions };
-                }
-                return m;
-              }));
-              break;
-            }
-
-            case 'movie:sync': {
-              setMovieSyncState(payload.state);
-              break;
-            }
-
-            case 'call:dial': {
-              setCallType(payload.mode);
-              callTypeRef.current = payload.mode;
-              setIncomingCall(true);
-              setRingingRole('callee');
-              playSweetSparkSound();
-              showPushNotification(
-                `📞 Incoming ${payload.mode === 'video' ? 'Video' : 'Voice'} Call`,
-                `${currentUser?.partnerName || 'Your partner'} is calling you... 💖`,
-                'call',
-                'chat'
-              );
-              break;
-            }
-
-            case 'call:response': {
-              if (payload.action === 'accept') {
-                setIncomingCall(false);
-                setCallActive(true);
-                setRingingRole(null);
-                playBirdChirp();
-                handleStartWebRTCOffer();
-              } else {
-                cleanupCalling();
-              }
-              break;
-            }
-
-            case 'call:sdp-offer': {
-              handleReceiveWebRTCOffer(payload.sdp);
-              break;
-            }
-
-            case 'call:sdp-answer': {
-              handleReceiveWebRTCAnswer(payload.sdp);
-              break;
-            }
-
-            case 'call:ice-candidate': {
-              handleReceiveIceCandidate(payload.candidate);
-              break;
-            }
-
-            case 'call:hangup': {
-              const wasMissed = incomingCall;
-              cleanupCalling();
-              if (wasMissed) {
-                showPushNotification(
-                  "☎️ Missed Call",
-                  `You missed a call from ${currentUser?.partnerName || 'your partner'}. 💘`,
-                  'call',
-                  'chat'
-                );
-              }
-              break;
-            }
-
-            case 'state:update': {
-              if (payload.section === 'memories') {
-                fetchMemories();
-                playSweetMessageSound();
-                showPushNotification("📸 Shared Polaroid", `${currentUser.partnerName || 'Companion'} posted a new Polaroid to your Memory Wall! 🖼️`, 'memories', 'memories');
-              }
-              if (payload.section === 'calendar') {
-                fetchCalendar();
-                playSweetMessageSound();
-                showPushNotification("📅 Love hearth scheduled", `${currentUser.partnerName || 'Companion'} scheduled a new event on your Shared Calendar.`, 'calendar', 'calendar');
-              }
-              if (payload.section === 'journal') {
-                fetchJournal();
-                playSweetMessageSound();
-                showPushNotification("📓 secret Diary page", `${currentUser.partnerName || 'Companion'} wrote a new private journal page!`, 'journal', 'journal');
-              }
-              if (payload.section === 'daily') {
-                fetchAnswersOnly();
-                playSweetSparkSound();
-                showPushNotification("❓ Q&A Playroom", `${currentUser.partnerName || 'Companion'} answered today's Question! Unlock to read. 🥰`, 'daily', 'daily');
-              }
-              if (payload.section === 'bucket') {
-                fetchBucketList();
-                playSweetSparkSound();
-                showPushNotification("🗺️ Bucket List Update", `${currentUser.partnerName || 'Companion'} updated your Shared Adventure checklist!`, 'bucket', 'bucket');
-              }
-              if (payload.section === 'stats') {
-                fetchStatsAndAnswers();
-              }
-              if (payload.section === 'profile' || payload.section === 'presence') {
-                handleRefreshUser();
-              }
-              if (payload.section === 'sleep_on') {
-                setIsSleepMode(true);
-                playSweetLullaby();
-                showPushNotification("💤 Starry Sky Tucked", `${currentUser.partnerName || 'Companion'} tucked themselves in sleep together.`, 'system', 'dashboard');
-              }
-              if (payload.section === 'sleep_off') {
-                setIsSleepMode(false);
-                playBirdChirp();
-                showPushNotification("🌅 Golden Good Morning", `${currentUser.partnerName || 'Companion'} woke up. Good morning my love! 🌸`, 'system', 'dashboard');
-              }
-              if (payload.section === 'sleep_spark' as any) {
-                setReceivedSleepSpark(true);
-                playSweetSparkSound();
-                playSweetHeartbeat();
-                showPushNotification("💖 Sweet Touch Spark", `${currentUser.partnerName || 'Companion'} sent you a cuddle spark! ✨`, 'system', 'dashboard');
-                setTimeout(() => setReceivedSleepSpark(false), 3500);
-              }
-              break;
-            }
-          }
+          handleIncomingWSEvent(payload);
         } catch (err) {
           console.error('Error compiling websocket string:', err);
         }
@@ -978,15 +1253,65 @@ export default function App() {
       };
     };
 
+    const connectMetered = async () => {
+      if (isDestroyed) return;
+      try {
+        console.log('[Metered Realtime] Initializing SignallingClient for channel:', currentUser.coupleId);
+        meteredSignalling = new SignallingClient({
+          // Securely use the client-side API key from environment variables
+          apiKey: import.meta.env.VITE_METERED_REALTIME_API_KEY || 'sk_secret_ffeb92ae73cd8668dff2a2609b6a25b9183448a6562837edca95a86c8744f912'
+        });
+        meteredSignallingRef.current = meteredSignalling;
+
+        meteredSignalling.on('connected', (payload) => {
+          if (isDestroyed || !meteredSignalling) return;
+          console.log('[Metered Realtime] Premium signaling server linked. Peer ID:', payload.peerId);
+          meteredSignalling.subscribe(`couple_${currentUser.coupleId}`).then(() => {
+            console.log(`[Metered Realtime] Subscribed to premium pub/sub channel: couple_${currentUser.coupleId}`);
+          }).catch((err) => {
+            console.error('[Metered Realtime] Failed to subscribe to couple channel:', err);
+          });
+        });
+
+        meteredSignalling.on('message', (msgEvent) => {
+          if (isDestroyed) return;
+          try {
+            const payload = msgEvent.data as any;
+            if (payload && payload.senderUserId === currentUser.id) {
+              // Ignore echoed message we published ourselves
+              return;
+            }
+            console.log('[Metered Realtime] Received message type:', payload.type);
+            handleIncomingWSEvent(payload as WSEvent);
+          } catch (e) {
+            console.error('[Metered Realtime] Error reading incoming payload packet:', e);
+          }
+        });
+
+        meteredSignalling.on('disconnected', (payload) => {
+          console.warn('[Metered Realtime] Disconnected. Will automatic retry:', payload.willReconnect);
+        });
+
+        await meteredSignalling.connect();
+      } catch (err) {
+        console.error('[Metered Realtime] Failed to establish premium signal channel:', err);
+      }
+    };
+
     connectSocket();
+    connectMetered();
 
     return () => {
       isDestroyed = true;
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (ws) ws.close();
+      if (meteredSignalling) {
+        meteredSignalling.close().catch(() => {});
+      }
       socketRef.current = null;
+      meteredSignallingRef.current = null;
     };
-  }, [currentUser, fetchAllData]);
+  }, [currentUser?.id, fetchAllData, handleIncomingWSEvent]);
 
   // 3. Firestore Real-time Listeners (Phase 1)
   useEffect(() => {
@@ -1001,31 +1326,45 @@ export default function App() {
     };
 
     try {
-      // Messages listener
-      const qMsgs = query(collection(db, 'messages'), where('coupleId', '==', currentUser.coupleId));
+      // Messages listener (Surgical: Last 40 messages)
+      const qMsgs = query(
+        collection(db, 'messages'), 
+        where('coupleId', '==', currentUser.coupleId),
+        orderBy('timestamp', 'asc'),
+        limit(40)
+      );
       const unsubMsgs = onSnapshot(qMsgs, (snapshot) => {
         const msgs: Message[] = [];
         snapshot.forEach(docSnap => {
           msgs.push({ id: docSnap.id, ...docSnap.data() } as Message);
         });
-        msgs.sort((a, b) => a.timestamp - b.timestamp);
         setMessages(msgs);
       }, (err) => handleListenerError(err, 'messages'));
       unsubscribes.push(unsubMsgs);
 
-      // Memories listener
-      const qMem = query(collection(db, 'memories'), where('coupleId', '==', currentUser.coupleId));
+      // Memories listener (Surgical: Last 30 memories)
+      const qMem = query(
+        collection(db, 'memories'), 
+        where('coupleId', '==', currentUser.coupleId),
+        orderBy('date', 'desc'),
+        limit(30)
+      );
       const unsubMem = onSnapshot(qMem, (snapshot) => {
         const items: Memory[] = [];
         snapshot.forEach(docSnap => {
           items.push({ id: docSnap.id, ...docSnap.data() } as Memory);
         });
+        items.sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
         setMemories(items);
       }, (err) => handleListenerError(err, 'memories'));
       unsubscribes.push(unsubMem);
 
-      // CalendarEvents listener
-      const qCal = query(collection(db, 'calendarEvents'), where('coupleId', '==', currentUser.coupleId));
+      // CalendarEvents listener (No limit usually needed as events are sparse, but helpful for cost protection)
+      const qCal = query(
+        collection(db, 'calendarEvents'), 
+        where('coupleId', '==', currentUser.coupleId),
+        limit(100)
+      );
       const unsubCal = onSnapshot(qCal, (snapshot) => {
         const items: CalendarEvent[] = [];
         snapshot.forEach(docSnap => {
@@ -1035,8 +1374,13 @@ export default function App() {
       }, (err) => handleListenerError(err, 'calendarEvents'));
       unsubscribes.push(unsubCal);
 
-      // JournalEntries listener
-      const qJrn = query(collection(db, 'journalEntries'), where('coupleId', '==', currentUser.coupleId));
+      // JournalEntries listener (Surgical: Last 20 entries)
+      const qJrn = query(
+        collection(db, 'journalEntries'), 
+        where('coupleId', '==', currentUser.coupleId),
+        orderBy('date', 'desc'),
+        limit(20)
+      );
       const unsubJrn = onSnapshot(qJrn, (snapshot) => {
         const items: JournalEntry[] = [];
         snapshot.forEach(docSnap => {
@@ -1047,7 +1391,11 @@ export default function App() {
       unsubscribes.push(unsubJrn);
 
       // BucketItems listener
-      const qBkt = query(collection(db, 'bucketItems'), where('coupleId', '==', currentUser.coupleId));
+      const qBkt = query(
+        collection(db, 'bucketItems'), 
+        where('coupleId', '==', currentUser.coupleId),
+        limit(50)
+      );
       const unsubBkt = onSnapshot(qBkt, (snapshot) => {
         const items: BucketItem[] = [];
         snapshot.forEach(docSnap => {
@@ -1057,8 +1405,13 @@ export default function App() {
       }, (err) => handleListenerError(err, 'bucketItems'));
       unsubscribes.push(unsubBkt);
 
-      // DailyAnswers listener
-      const qAns = query(collection(db, 'dailyAnswers'), where('coupleId', '==', currentUser.coupleId));
+      // DailyAnswers listener (Surgical: Last 50 answers)
+      const qAns = query(
+        collection(db, 'dailyAnswers'), 
+        where('coupleId', '==', currentUser.coupleId),
+        orderBy('timestamp', 'desc'),
+        limit(50)
+      );
       const unsubAns = onSnapshot(qAns, (snapshot) => {
         const items: DailyAnswer[] = [];
         snapshot.forEach(docSnap => {
@@ -1135,72 +1488,35 @@ export default function App() {
   }, [currentUser?.id, currentUser?.coupleId, currentUser?.partnerId]);
 
   // Minor isolated data refreshers supporting WebSocket notifications
-  const fetchMemories = async () => {
-    if (!currentUser?.coupleId) return;
-    const res = await fetch(`/api/memories?coupleId=${currentUser.coupleId}`);
-    setMemories(await res.json());
-  };
-
-  const fetchCalendar = async () => {
-    if (!currentUser?.coupleId) return;
-    const res = await fetch(`/api/calendar?coupleId=${currentUser.coupleId}`);
-    setCalendarEvents(await res.json());
-  };
-
-  const fetchJournal = async () => {
-    if (!currentUser?.coupleId) return;
-    const res = await fetch(`/api/journal?coupleId=${currentUser.coupleId}`);
-    setJournalEntries(await res.json());
-  };
-
-  const fetchBucketList = async () => {
-    if (!currentUser?.coupleId) return;
-    const res = await fetch(`/api/bucket-list?coupleId=${currentUser.coupleId}`);
-    setBucketItems(await res.json());
-  };
-
-  const fetchAnswersOnly = async () => {
-    if (!currentUser?.coupleId || !dailyQuestion?.id) return;
-    const res = await fetch(`/api/daily-answers?coupleId=${currentUser.coupleId}&questionId=${dailyQuestion.id}`);
-    setDailyAnswers(await res.json());
-  };
-
-  const fetchStatsAndAnswers = async () => {
-    if (!currentUser?.coupleId) return;
-    const [statsRes] = await Promise.all([
-      fetch(`/api/stats?coupleId=${currentUser.coupleId}&userId=${currentUser.id}`)
-    ]);
-    setStats(await statsRes.json());
-  };
-
   // 3. Messaging Callbacks
   const dispatchWebSocketMessage = async (msg: Message) => {
     let wsDelivered = false;
     try {
-      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({
-          type: 'chat:message',
-          message: msg
-        }));
-        wsDelivered = true;
-      }
+      wsDelivered = sendRealTimeEvent({
+        type: 'chat:message',
+        message: msg
+      });
     } catch (err) {
-      console.warn('[WebRTC/WS] WebSocket message dispatch failed, using Firestore direct backup:', err);
+      console.warn('[WebRTC/WS] Message dispatch unsuccessful, using direct Firestore backup:', err);
     }
 
-    // Direct Firestore backup to guarantee absolute delivery (PWAs / background networks / cold starts)
+    if (wsDelivered) {
+      // Delivered instantly via WebSocket! The server will safely persist it and broadcast to partner.
+      // We return immediately to avoid parallel client/server DB dual-write conflicts & delays.
+      return;
+    }
+
+    // Direct Firestore backup to guarantee absolute delivery ONLY when offline/WS is down
     try {
       const docRef = doc(db, 'messages', msg.id);
       const messageToSave = {
         ...msg,
-        status: wsDelivered ? msg.status : 'sent'
+        status: 'sent'
       };
       await setDoc(docRef, messageToSave);
       
-      // If sent using backup, immediately set local state status to 'sent'
-      if (!wsDelivered) {
-        setMessages((prev) => prev.map(m => m.id === msg.id ? { ...m, status: 'sent' } : m));
-      }
+      // Immediately set local state status to 'sent'
+      setMessages((prev) => prev.map(m => m.id === msg.id ? { ...m, status: 'sent' } : m));
     } catch (fsErr) {
       console.error('[WebRTC/FS] Combined fallback direct save to Firestore also failed:', fsErr);
       setMessages((prev) => prev.map(m => m.id === msg.id ? { ...m, status: 'failed' } : m));
@@ -1259,15 +1575,13 @@ export default function App() {
       return m;
     }));
 
-    // Broadcast over WS if connected
-    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify({
-        type: 'chat:reaction',
-        messageId,
-        reaction,
-        action
-      }));
-    }
+    // Broadcast over real-time stream
+    sendRealTimeEvent({
+      type: 'chat:reaction',
+      messageId,
+      reaction,
+      action
+    });
 
     // Direct Firestore update to persist reaction
     try {
@@ -1285,21 +1599,20 @@ export default function App() {
   };
 
   const handleSendTyping = (isTyping: boolean) => {
-    if (!currentUser || !socketRef.current) return;
-    socketRef.current.send(JSON.stringify({
+    if (!currentUser) return;
+    sendRealTimeEvent({
       type: 'chat:typing',
       userId: currentUser.id,
       isTyping
-    }));
+    });
   };
 
   // 4. Movie Cinema Synch Event Callback
   const handleEmitMovieSync = (state: MovieState) => {
-    if (!socketRef.current) return;
-    socketRef.current.send(JSON.stringify({
+    sendRealTimeEvent({
       type: 'movie:sync',
       state
-    }));
+    });
   };
 
   // 5. REST posting wrappers passed as props to sub-components
@@ -1318,12 +1631,10 @@ export default function App() {
     fetchStatsAndAnswers();
 
     // Broadcast update indicator so lover client pulls
-    if (socketRef.current) {
-      socketRef.current.send(JSON.stringify({
-        type: 'state:update',
-        section: 'memories'
-      }));
-    }
+    sendRealTimeEvent({
+      type: 'state:update',
+      section: 'memories'
+    });
   };
 
   const handleAddCalendarEvent = async (newEvent: Omit<CalendarEvent, 'id'>) => {
@@ -1339,12 +1650,10 @@ export default function App() {
     const saved = await res.json();
     setCalendarEvents((prev) => [...prev, saved]);
 
-    if (socketRef.current) {
-      socketRef.current.send(JSON.stringify({
-        type: 'state:update',
-        section: 'calendar'
-      }));
-    }
+    sendRealTimeEvent({
+      type: 'state:update',
+      section: 'calendar'
+    });
   };
 
   const handleAddDailyAnswer = async (answerText: string) => {
@@ -1365,12 +1674,10 @@ export default function App() {
     fetchAnswersOnly();
     fetchStatsAndAnswers();
 
-    if (socketRef.current) {
-      socketRef.current.send(JSON.stringify({
-        type: 'state:update',
-        section: 'daily'
-      }));
-    }
+    sendRealTimeEvent({
+      type: 'state:update',
+      section: 'daily'
+    });
   };
 
   const handleAddJournalEntry = async (newEntry: Omit<JournalEntry, 'id'>) => {
@@ -1387,12 +1694,10 @@ export default function App() {
     setJournalEntries((prev) => [saved, ...prev]); // newest first
     fetchStatsAndAnswers();
 
-    if (socketRef.current) {
-      socketRef.current.send(JSON.stringify({
-        type: 'state:update',
-        section: 'journal'
-      }));
-    }
+    sendRealTimeEvent({
+      type: 'state:update',
+      section: 'journal'
+    });
   };
 
   const handleAddBucketItem = async (title: string, category: BucketItem['category']) => {
@@ -1414,12 +1719,10 @@ export default function App() {
     const saved = await res.json();
     setBucketItems((prev) => [...prev, saved]);
 
-    if (socketRef.current) {
-      socketRef.current.send(JSON.stringify({
-        type: 'state:update',
-        section: 'bucket'
-      }));
-    }
+    sendRealTimeEvent({
+      type: 'state:update',
+      section: 'bucket'
+    });
   };
 
   const handleToggleBucketItem = async (id: string) => {
@@ -1436,12 +1739,10 @@ export default function App() {
     const updated = await res.json();
     setBucketItems((prev) => prev.map((item) => (item.id === id ? updated : item)));
 
-    if (socketRef.current) {
-      socketRef.current.send(JSON.stringify({
-        type: 'state:update',
-        section: 'bucket'
-      }));
-    }
+    sendRealTimeEvent({
+      type: 'state:update',
+      section: 'bucket'
+    });
   };
 
   const handleDeleteBucketItem = async (id: string) => {
@@ -1457,12 +1758,10 @@ export default function App() {
     if (!res.ok) return;
     setBucketItems((prev) => prev.filter((item) => item.id !== id));
 
-    if (socketRef.current) {
-      socketRef.current.send(JSON.stringify({
-        type: 'state:update',
-        section: 'bucket'
-      }));
-    }
+    sendRealTimeEvent({
+      type: 'state:update',
+      section: 'bucket'
+    });
   };
 
   // 6. Media and Calling handlers
@@ -1827,311 +2126,9 @@ export default function App() {
     }
   };
 
-  const reconnectCall = async () => {
-    try {
-      const pc = peerConnectionRef.current;
-      if (!pc || pc.connectionState === 'closed') {
-        console.warn('[WebRTC] Reconnection triggered but RTCPeerConnection is inactive or closed.');
-        return;
-      }
-
-      console.log('[WebRTC] Automated reconnection initiated...');
-      
-      // Perform local ICE restart first if supported
-      if (typeof pc.restartIce === 'function') {
-        try {
-          console.log('[WebRTC] Calling pc.restartIce() to request new ICE generation.');
-          pc.restartIce();
-        } catch (e) {
-          console.warn('[WebRTC] pc.restartIce() got exception, proceeding with standard iceRestart offer:', e);
-        }
-      }
-
-      // Generate a fresh offer requesting ICE restart
-      const offer = await pc.createOffer({ iceRestart: true });
-      await pc.setLocalDescription(offer);
-
-      // Clear the local ICE candidate queue for a fresh start so candidates don't bleed between sessions
-      iceCandidatesQueueRef.current = [];
-
-      if (socketRef.current && currentUser?.partnerId) {
-        console.log('[WebRTC] Broadcasting fresh iceRestart SDP offer to partner:', currentUser.partnerId);
-        socketRef.current.send(JSON.stringify({
-          type: 'call:sdp-offer',
-          sdp: offer,
-          targetId: currentUser.partnerId
-        }));
-      }
-    } catch (err) {
-      console.error('[WebRTC] Automated reconnection flow failed:', err);
-    }
-  };
-
-  const createPeerConnection = (stream: MediaStream | null) => {
-    // We design the ICE candidate queues to persist during initialization to avoid race events
-    console.log('[WebRTC] Creating RTCPeerConnection, current candidate queue size:', iceCandidatesQueueRef.current.length);
-
-    // Support custom TURN configurations from localStorage, falling back to env or OpenRelay TURN servers
-    const storedTurnUrl = localStorage.getItem('mutu_custom_turn_url');
-    const storedTurnUser = localStorage.getItem('mutu_custom_turn_username');
-    const storedTurnCred = localStorage.getItem('mutu_custom_turn_credential');
-
-    const customTurnUrl = storedTurnUrl || import.meta.env.VITE_TURN_URL;
-    const customTurnUser = storedTurnUser || import.meta.env.VITE_TURN_USERNAME;
-    const customTurnCred = storedTurnCred || import.meta.env.VITE_TURN_CREDENTIAL;
-
-    const defaultIceServers = [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
-      { urls: 'stun:stun3.l.google.com:19302' },
-      { urls: 'stun:stun4.l.google.com:19302' },
-      { urls: 'stun:global.stun.twilio.com:3478' },
-      {
-        urls: 'turn:openrelay.metered.ca:80',
-        username: 'openrelayproject',
-        credential: 'openrelayproject'
-      },
-      {
-        urls: 'turn:openrelay.metered.ca:443',
-        username: 'openrelayproject',
-        credential: 'openrelayproject'
-      },
-      {
-        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-        username: 'openrelayproject',
-        credential: 'openrelayproject'
-      }
-    ];
-
-    if (customTurnUrl && customTurnUser && customTurnCred) {
-      console.log('[WebRTC] Custom pre-configured/localStorage TURN credentials detected. Appending to iceServers list:', customTurnUrl);
-      defaultIceServers.unshift({
-        urls: customTurnUrl,
-        username: customTurnUser,
-        credential: customTurnCred
-      });
-    }
-
-    const pc = new RTCPeerConnection({
-      iceServers: defaultIceServers,
-      iceCandidatePoolSize: 10 // Pre-gathers candidates for faster call setup
-    });
-
-    peerConnectionRef.current = pc;
-
-    const handleFailedConnection = () => {
-      console.warn('[WebRTC] Connection has hit a failed state! Determining reconnect initiator...');
-      if (currentUser && currentUser.partnerId) {
-        if (currentUser.id < currentUser.partnerId) {
-          console.log('[WebRTC] We are the designated initiator. Triggering reconnection after brief timeout...');
-          setTimeout(() => {
-            reconnectCall();
-          }, 1000); // 1s buffer to let both ends stabilize state
-        } else {
-          console.log('[WebRTC] We are the passive negotiator. Remote partner will initiate the reconnection SDP offer.');
-        }
-      } else {
-        // Fallback if user session isn't loaded
-        console.log('[WebRTC] User session context incomplete. Fallback initiator triggers reconnect.');
-        setTimeout(() => {
-          reconnectCall();
-        }, 1000);
-      }
-    };
-
-    // Track state transitions to diagnose latency or potential visual freezes
-    setWebrtcIceState(pc.iceConnectionState);
-    setWebrtcSignalingState(pc.signalingState);
-
-    pc.onsignalingstatechange = () => {
-      setWebrtcSignalingState(pc.signalingState);
-    };
-
-    pc.oniceconnectionstatechange = () => {
-      console.log('[WebRTC] ICE Connection State changed to:', pc.iceConnectionState);
-      setWebrtcIceState(pc.iceConnectionState);
-      if (pc.iceConnectionState === 'failed') {
-        handleFailedConnection();
-      } else if (pc.iceConnectionState === 'disconnected') {
-        console.warn('[WebRTC] ICE Connection sluggish/disconnected. Attempting automatic ICE restart...');
-        if (typeof pc.restartIce === 'function') {
-          try {
-            pc.restartIce();
-          } catch (err) {
-            console.log('[WebRTC] ICE restart failed or got exception:', err);
-          }
-        }
-      }
-    };
-
-    pc.onconnectionstatechange = () => {
-      console.log('[WebRTC] Peer Connection State changed to:', pc.connectionState);
-      if (pc.connectionState === 'failed') {
-        handleFailedConnection();
-      } else if (pc.connectionState === 'connected') {
-        console.log('[WebRTC] Video/Audio channel fully CONNECTED and stable.');
-      }
-    };
-
-    // Attach local tracks to the connection
-    if (stream) {
-      stream.getTracks().forEach(track => {
-        pc.addTrack(track, stream);
-      });
-    }
-
-    // Capture generated ICE candidates and relay them via WebSocket Private matching
-    pc.onicecandidate = (event) => {
-      if (event.candidate && socketRef.current && currentUser?.partnerId) {
-        socketRef.current.send(JSON.stringify({
-          type: 'call:ice-candidate',
-          candidate: event.candidate,
-          targetId: currentUser.partnerId
-        }));
-      }
-    };
-
-    // Receive incoming remote tracks and route them to standard UI players
-    pc.ontrack = (event) => {
-      console.log('[WebRTC] Received remote track:', event.track.kind, 'ID:', event.track.id);
-      
-      // Lazily initialize the remote stream if it does not exist
-      if (!remoteStreamRef.current) {
-        remoteStreamRef.current = new MediaStream();
-        console.log('[WebRTC] Initialized new remote MediaStream ref');
-      }
-      
-      // Add the track to our accumulated MediaStream if not already present
-      const alreadyHasTrack = remoteStreamRef.current.getTracks().some(t => t.id === event.track.id);
-      if (!alreadyHasTrack) {
-        console.log('[WebRTC] Accumulating remote track:', event.track.kind);
-        remoteStreamRef.current.addTrack(event.track);
-      }
-      
-      // Create a fresh wrapper MediaStream with all current tracks
-      // This guarantees that the stream reference shifts, triggering React's dependency tracking
-      const compositeStream = new MediaStream(remoteStreamRef.current.getTracks());
-      setRemoteStream(compositeStream);
-      setRemoteStreamActive(true);
-      
-      // Direct-binding stream immediately to existing elements to bypass React rendering cycle/stale ref delay
-      if (partnerVideoRef.current) {
-        if (partnerVideoRef.current.srcObject !== compositeStream) {
-          console.log('[WebRTC] Direct-binding ontrack to partnerVideoRef');
-          partnerVideoRef.current.srcObject = compositeStream;
-          partnerVideoRef.current.play().catch(err => console.log('[WebRTC] partnerVideoRef play blocked:', err));
-        }
-      }
-      if (remoteAudioRef.current) {
-        if (remoteAudioRef.current.srcObject !== compositeStream) {
-          console.log('[WebRTC] Direct-binding ontrack to remoteAudioRef');
-          remoteAudioRef.current.srcObject = compositeStream;
-          remoteAudioRef.current.play().catch(err => console.log('[WebRTC] remoteAudioRef play blocked:', err));
-        }
-      }
-    };
-
-    return pc;
-  };
-
-  const drainIceCandidatesQueue = async () => {
-    try {
-      const pc = peerConnectionRef.current;
-      if (pc && pc.remoteDescription && pc.remoteDescription.type) {
-        const candidates = [...iceCandidatesQueueRef.current];
-        iceCandidatesQueueRef.current = [];
-        console.log(`[WebRTC] Draining ${candidates.length} accumulated ICE candidates...`);
-        for (const candidate of candidates) {
-          if (!candidate) continue;
-          try {
-            await pc.addIceCandidate(candidate);
-          } catch (err) {
-            console.error('[WebRTC] Failed to append queued ICE candidate:', err, candidate);
-          }
-        }
-      }
-    } catch (err) {
-      console.error('[WebRTC] Failed to drain ICE candidates queue:', err);
-    }
-  };
-
-  const handleStartWebRTCOffer = async () => {
-    try {
-      const pc = createPeerConnection(localStreamRef.current);
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      if (socketRef.current && currentUser?.partnerId) {
-        socketRef.current.send(JSON.stringify({
-          type: 'call:sdp-offer',
-          sdp: offer,
-          targetId: currentUser.partnerId
-        }));
-      }
-    } catch (err) {
-      console.error('Failed to initiate SDP Offer:', err);
-    }
-  };
-
-  const handleReceiveWebRTCOffer = async (sdp: any) => {
-    try {
-      let pc = peerConnectionRef.current;
-      if (!pc) {
-        pc = createPeerConnection(localStreamRef.current);
-      }
-      await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-      
-      // Drain any queued ice candidates safely now that remote description is set
-      await drainIceCandidatesQueue();
-
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-
-      if (socketRef.current && currentUser?.partnerId) {
-        socketRef.current.send(JSON.stringify({
-          type: 'call:sdp-answer',
-          sdp: answer,
-          targetId: currentUser.partnerId
-        }));
-      }
-    } catch (err) {
-      console.error('Failed to handle SDP Offer:', err);
-    }
-  };
-
-  const handleReceiveWebRTCAnswer = async (sdp: any) => {
-    try {
-      const pc = peerConnectionRef.current;
-      if (pc) {
-        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-        // Drain any queued ice candidates safely
-        await drainIceCandidatesQueue();
-      }
-    } catch (err) {
-      console.error('Failed to handle SDP Answer:', err);
-    }
-  };
-
-  const handleReceiveIceCandidate = async (candidate: any) => {
-    try {
-      if (!candidate) return;
-      const pc = peerConnectionRef.current;
-      if (pc && pc.remoteDescription && pc.remoteDescription.type) {
-        await pc.addIceCandidate(candidate);
-      } else {
-        // Queue candidates if connection or remote description has not been fully resolved yet
-        console.log('[WebRTC] Remote description not ready. Queueing candidate:', candidate);
-        iceCandidatesQueueRef.current.push(candidate);
-      }
-    } catch (err) {
-      console.error('[WebRTC] Failed to append ICE candidate directly:', err);
-    }
-  };
-
   // Dial out call
   const triggerDialOut = async (mode: 'voice' | 'video') => {
-    if (!currentUser || !socketRef.current) return;
+    if (!currentUser) return;
     // Clear and reset ICE candidates queue strictly on new call session initialization
     iceCandidatesQueueRef.current = [];
     
@@ -2149,17 +2146,17 @@ export default function App() {
     // Warm up local media stream immediately
     const stream = await initiateMediaStream(mode);
 
-    // Send signal over websocket
-    socketRef.current.send(JSON.stringify({
+    // Send signal over premium matchmaker channel
+    sendRealTimeEvent({
       type: 'call:dial',
       mode,
       callerId: currentUser.id
-    }));
+    });
   };
 
   // Accept incoming call
   const handleAcceptCall = async () => {
-    if (!socketRef.current || !currentUser) return;
+    if (!currentUser) return;
     // Clear and reset ICE candidates queue strictly on new call session initialization
     iceCandidatesQueueRef.current = [];
 
@@ -2180,37 +2177,37 @@ export default function App() {
     createPeerConnection(stream);
 
     // 3. Send accept notification ONLY AFTER tracks are loaded in PC
-    socketRef.current.send(JSON.stringify({
+    sendRealTimeEvent({
       type: 'call:response',
       action: 'accept',
       calleeId: currentUser.id
-    }));
+    });
   };
 
   // Decline call
   const handleDeclineCall = () => {
-    if (!socketRef.current || !currentUser) return;
+    if (!currentUser) return;
     setIncomingCall(false);
     setRingingRole(null);
 
     // Send decline notification
-    socketRef.current.send(JSON.stringify({
+    sendRealTimeEvent({
       type: 'call:response',
       action: 'decline',
       calleeId: currentUser.id
-    }));
+    });
   };
 
   // Hanugp/End call
   const handleHangupCall = () => {
-    if (!socketRef.current || !currentUser) return;
+    if (!currentUser) return;
     cleanupCalling();
 
     // Notify other partner
-    socketRef.current.send(JSON.stringify({
+    sendRealTimeEvent({
       type: 'call:hangup',
       userId: currentUser.id
-    }));
+    });
   };
 
   const cleanupCalling = () => {
@@ -2277,11 +2274,11 @@ export default function App() {
       synthRef.current.stop();
       synthRef.current = null;
     }
-    if (socketRef.current && currentUser) {
-      socketRef.current.send(JSON.stringify({
+    if (currentUser) {
+      sendRealTimeEvent({
         type: 'state:update',
         section: enabled ? 'sleep_on' : 'sleep_off'
-      }));
+      });
     }
   };
 
@@ -2323,28 +2320,22 @@ export default function App() {
             onVoiceCall={() => triggerDialOut('voice')}
             onVideoCall={() => triggerDialOut('video')}
             onSendThumbKissToggle={(active) => {
-              if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-                socketRef.current.send(JSON.stringify({
-                  type: active ? 'chat:thumb-kiss-start' : 'chat:thumb-kiss-end',
-                  userId: currentUser.id
-                }));
-              }
+              sendRealTimeEvent({
+                type: active ? 'chat:thumb-kiss-start' : 'chat:thumb-kiss-end',
+                userId: currentUser.id
+              });
             }}
             onJoin={() => {
-              if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-                socketRef.current.send(JSON.stringify({
-                  type: 'chat:join',
-                  userId: currentUser.id
-                }));
-              }
+              sendRealTimeEvent({
+                type: 'chat:join',
+                userId: currentUser.id
+              });
             }}
             onLeave={() => {
-              if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-                socketRef.current.send(JSON.stringify({
-                  type: 'chat:leave',
-                  userId: currentUser.id
-                }));
-              }
+              sendRealTimeEvent({
+                type: 'chat:leave',
+                userId: currentUser.id
+              });
             }}
             onRetryMessage={handleRetryMessage}
           />
@@ -2501,12 +2492,21 @@ export default function App() {
   // Lock page scrolling when in mobile chat view to ensure no browser header scroll push
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    let handleWindowScroll: (() => void) | null = null;
+
     if (activeSection === 'chat') {
       document.documentElement.style.overflow = 'hidden';
       document.body.style.overflow = 'hidden';
       document.body.style.position = 'fixed';
       document.body.style.width = '100%';
       document.body.style.height = '100%';
+
+      handleWindowScroll = () => {
+        window.scrollTo(0, 0);
+        document.body.scrollTop = 0;
+      };
+      window.addEventListener('scroll', handleWindowScroll, { passive: true });
+      window.scrollTo(0, 0);
     } else {
       document.documentElement.style.overflow = '';
       document.body.style.overflow = '';
@@ -2520,6 +2520,9 @@ export default function App() {
       document.body.style.position = '';
       document.body.style.width = '';
       document.body.style.height = '';
+      if (handleWindowScroll) {
+        window.removeEventListener('scroll', handleWindowScroll);
+      }
     };
   }, [activeSection]);
 
@@ -2547,91 +2550,93 @@ export default function App() {
     >
       
       {/* Visual Navigation Bar */}
-      <header className="p-4 bg-white/40 dark:bg-stone-900/40 backdrop-blur-md border-b border-rose-100 dark:border-stone-800 flex items-center justify-between sticky top-0 z-40 select-none">
-        
-        <div className="flex items-center gap-2 cursor-pointer" onClick={() => { navigateToSection('dashboard'); playSweetMessageSound(); }}>
-          <div className="bg-[var(--color-kinky-red)] text-white p-1.5 rounded-xl shadow-inner text-rose-500">
-            <Heart size={18} fill="currentColor" className="animate-pulse text-white" />
+      {activeSection !== 'chat' && (
+        <header className="p-4 bg-white/40 dark:bg-stone-900/40 backdrop-blur-md border-b border-rose-100 dark:border-stone-800 flex items-center justify-between sticky top-0 z-40 select-none">
+          
+          <div className="flex items-center gap-2 cursor-pointer" onClick={() => { navigateToSection('dashboard'); playSweetMessageSound(); }}>
+            <div className="bg-[var(--color-kinky-red)] text-white p-1.5 rounded-xl shadow-inner text-rose-500">
+              <Heart size={18} fill="currentColor" className="animate-pulse text-white" />
+            </div>
+            <div>
+              <span className="font-serif font-extrabold text-[var(--color-kinky-red)] text-lg leading-none tracking-tight block">MuTu</span>
+              <span className="text-[7px] text-stone-400 dark:text-stone-500 font-bold uppercase tracking-widest mt-0.5 block">For Couple</span>
+            </div>
           </div>
-          <div>
-            <span className="font-serif font-extrabold text-[var(--color-kinky-red)] text-lg leading-none tracking-tight block">MuTu</span>
-            <span className="text-[7px] text-stone-400 dark:text-stone-500 font-bold uppercase tracking-widest mt-0.5 block">For Couple</span>
-          </div>
-        </div>
 
-        {/* Global Action Items */}
-        <div className="flex items-center gap-2">
-          {/* Global Theme Toggle */}
-          <button
-            onClick={handleToggleGlobalTheme}
-            className="p-2 border border-stone-200 dark:border-stone-700 hover:bg-stone-50 dark:hover:bg-stone-800 text-stone-500 dark:text-stone-300 rounded-xl transition-all cursor-pointer"
-            title="Toggle theme"
-          >
-            {(theme === 'dark' || (theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)) ? (
-              <Moon size={14} className="text-indigo-400" />
-            ) : (
-              <Sun size={14} className="text-amber-500" />
-            )}
-          </button>
-
-          {/* Conditional items for coupled lovers (Float phone controllers everywhere) */}
-          {currentUser && currentUser.partnerId && (
-            <>
-              {/* Chime Bell System Button */}
+          {/* Global Action Items */}
+          <div className="flex items-center gap-2">
+            {/* Global Theme Toggle */}
             <button
-              onClick={() => { setShowNotificationsModal(true); playSweetSparkSound(); }}
-              className="p-2 border border-rose-100 hover:bg-rose-50 text-stone-500 rounded-xl transition-all relative cursor-pointer"
-              title="Chimes & Alerts Lounge"
-              id="h_bell"
+              onClick={handleToggleGlobalTheme}
+              className="p-2 border border-stone-200 dark:border-stone-700 hover:bg-stone-50 dark:hover:bg-stone-800 text-stone-500 dark:text-stone-300 rounded-xl transition-all cursor-pointer"
+              title="Toggle theme"
             >
-              <Bell size={14} />
-              {recentNotifications.filter(n => !n.read).length > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-500 text-white rounded-full text-[8.5px] font-extrabold flex items-center justify-center font-mono animate-bounce shadow-xs">
-                  {recentNotifications.filter(n => !n.read).length}
-                </span>
+              {(theme === 'dark' || (theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)) ? (
+                <Moon size={14} className="text-indigo-400" />
+              ) : (
+                <Sun size={14} className="text-amber-500" />
               )}
             </button>
 
-            {/* Glowing Analytics Award Journey Icon */}
-            <button
-              onClick={() => { setShowAnalyticsModal(true); playSweetMessageSound(); }}
-              className="p-2 border border-rose-200 hover:bg-rose-100 text-rose-500 bg-rose-50 rounded-xl transition-all relative cursor-pointer shadow-3xs"
-              title="Journey Analytics Telemetry"
-              id="h_analytics"
-            >
-              <Award size={14} fill="currentColor" />
-            </button>
+            {/* Conditional items for coupled lovers (Float phone controllers everywhere) */}
+            {currentUser && currentUser.partnerId && (
+              <>
+                {/* Chime Bell System Button */}
+              <button
+                onClick={() => { setShowNotificationsModal(true); playSweetSparkSound(); }}
+                className="p-2 border border-rose-100 hover:bg-rose-50 text-stone-500 rounded-xl transition-all relative cursor-pointer"
+                title="Chimes & Alerts Lounge"
+                id="h_bell"
+              >
+                <Bell size={14} />
+                {recentNotifications.filter(n => !n.read).length > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-500 text-white rounded-full text-[8.5px] font-extrabold flex items-center justify-center font-mono animate-bounce shadow-xs">
+                    {recentNotifications.filter(n => !n.read).length}
+                  </span>
+                )}
+              </button>
 
-            {/* Quick Live voice-dial button */}
-            <button
-              onClick={() => triggerDialOut('voice')}
-              className="p-2 border border-rose-100 hover:bg-rose-50 text-rose-500 rounded-xl transition-all cursor-pointer"
-              title="Start Love Voice Calling"
-              id="h_voice_dial"
-            >
-              <Phone size={14} />
-            </button>
+              {/* Glowing Analytics Award Journey Icon */}
+              <button
+                onClick={() => { setShowAnalyticsModal(true); playSweetMessageSound(); }}
+                className="p-2 border border-rose-200 hover:bg-rose-100 text-rose-500 bg-rose-50 rounded-xl transition-all relative cursor-pointer shadow-3xs"
+                title="Journey Analytics Telemetry"
+                id="h_analytics"
+              >
+                <Award size={14} fill="currentColor" />
+              </button>
 
-            {/* Quick Live video-dial button */}
-            <button
-              onClick={() => triggerDialOut('video')}
-              className="p-2 btn-romantic text-white rounded-xl transition-all flex items-center justify-center cursor-pointer"
-              title="Start Love Video Calling"
-              id="h_video_dial"
-            >
-              <Video size={14} />
-            </button>
+              {/* Quick Live voice-dial button */}
+              <button
+                onClick={() => triggerDialOut('voice')}
+                className="p-2 border border-rose-100 hover:bg-rose-50 text-rose-500 rounded-xl transition-all cursor-pointer"
+                title="Start Love Voice Calling"
+                id="h_voice_dial"
+              >
+                <Phone size={14} />
+              </button>
 
-            {/* Verification key code label */}
-            <div className="bg-stone-50 dark:bg-stone-800 border border-stone-100 dark:border-stone-700 px-3 py-1.5 rounded-xl text-[10px] text-stone-500 dark:text-stone-400 font-semibold md:flex hidden items-center gap-1.5 shadow-3xs">
-              <ShieldCheck size={12} className="text-emerald-500" />
-              <span>Couple Lounge Nest Active</span>
-            </div>
-            
-            </>
-          )}
-        </div>
-      </header>
+              {/* Quick Live video-dial button */}
+              <button
+                onClick={() => triggerDialOut('video')}
+                className="p-2 btn-romantic text-white rounded-xl transition-all flex items-center justify-center cursor-pointer"
+                title="Start Love Video Calling"
+                id="h_video_dial"
+              >
+                <Video size={14} />
+              </button>
+
+              {/* Verification key code label */}
+              <div className="bg-stone-50 dark:bg-stone-800 border border-stone-100 dark:border-stone-700 px-3 py-1.5 rounded-xl text-[10px] text-stone-500 dark:text-stone-400 font-semibold md:flex hidden items-center gap-1.5 shadow-3xs">
+                <ShieldCheck size={12} className="text-emerald-500" />
+                <span>Couple Lounge Nest Active</span>
+              </div>
+              
+              </>
+            )}
+          </div>
+        </header>
+      )}
 
       {/* Modern Responsive Bottom Bar for Lazy Users perspective (1-Click Switchers) */}
       {currentUser && currentUser.partnerId && activeSection !== 'chat' && !isKeyboardOpen && (
@@ -3436,12 +3441,10 @@ export default function App() {
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => {
-                  if (socketRef.current) {
-                    socketRef.current.send(JSON.stringify({
-                      type: 'state:update',
-                      section: 'sleep_spark' as any
-                    }));
-                  }
+                  sendRealTimeEvent({
+                    type: 'state:update',
+                    section: 'sleep_spark' as any
+                  });
                 }}
                 className="py-2.5 px-3 bg-white/5 border border-white/10 hover:bg-white/10 active:scale-95 transition-all text-[11px] font-semibold text-rose-300 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer"
               >
