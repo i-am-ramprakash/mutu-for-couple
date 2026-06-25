@@ -91,7 +91,23 @@ export default function AuthScreen({ onAuthSuccess, currentUser, onRefreshUser }
       const data = await safeParseResponse(res);
       onAuthSuccess(data);
     } catch (err: any) {
-      setError(err.message || 'Authentication failed. Please verify credentials.');
+      console.error('Authentication error details:', err);
+      let errMsg = err.message || 'Authentication failed. Please verify credentials.';
+      const code = err.code || '';
+      
+      if (code === 'auth/email-already-in-use' || errMsg.includes('email-already-in-use')) {
+        errMsg = 'This email address is already registered in MuTu. If you already have an account, please switch to "Sign In" above or click below to log in.';
+      } else if (code === 'auth/wrong-password' || code === 'auth/invalid-credential' || errMsg.includes('wrong-password') || errMsg.includes('invalid-credential')) {
+        errMsg = 'Incorrect email or password. Please double check your credentials and try again.';
+      } else if (code === 'auth/user-not-found' || errMsg.includes('user-not-found')) {
+        errMsg = 'No account found with this email address. Please register a new account or check your email typing.';
+      } else if (code === 'auth/invalid-email' || errMsg.includes('invalid-email')) {
+        errMsg = 'Please enter a valid email address.';
+      } else if (code === 'auth/weak-password' || errMsg.includes('weak-password')) {
+        errMsg = 'Your password is too weak. Firebase requires passwords to be at least 6 characters.';
+      }
+      
+      setError(errMsg);
     } finally {
       setLoading(false);
     }
@@ -308,7 +324,21 @@ export default function AuthScreen({ onAuthSuccess, currentUser, onRefreshUser }
                   </p>
                 </div>
               ) : (
-                <span className="text-center block">{error}</span>
+                <div className="flex flex-col gap-2">
+                  <span className="text-left block leading-relaxed">{error}</span>
+                  {(error.includes('already registered') || error.includes('already-in-use') || error.includes('already in use')) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsLogin(true);
+                        setError('');
+                      }}
+                      className="text-left font-bold text-rose-500 hover:text-rose-600 dark:text-rose-400 underline cursor-pointer mt-1 flex items-center gap-1.5 hover:scale-[1.01] transition-all"
+                    >
+                      <span>👉 Click here to switch to Sign In</span>
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           )}

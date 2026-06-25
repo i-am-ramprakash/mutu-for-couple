@@ -53,17 +53,33 @@ router.post('/register', async (req, res) => {
 });
 
 router.post('/login', async (req, res) => {
-  const { uid } = req.body;
+  const { uid, email } = req.body;
   try {
     let user = db.users.find(u => u.id === uid);
     if (!user) {
       user = await getRecord<User>('users', uid) || undefined;
-      if (user) db.users.push(user);
+      if (user) {
+        db.users.push(user);
+      }
     }
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user) {
+      console.log(`[Login] User ${uid} not found in Firestore. Creating fallback user profile.`);
+      const newUser: User = {
+        id: uid,
+        name: email ? email.split('@')[0] : 'User',
+        email: email || '',
+        profilePhoto: '💖',
+        birthday: '',
+        online: false
+      };
+      await addRecord('users', newUser);
+      db.users.push(newUser);
+      user = newUser;
+    }
     res.json(user);
   } catch (err) {
-    res.status(500).json({ error: 'Login failed' });
+    console.error('[Login Route Error]:', err);
+    res.status(500).json({ error: `Login failed: ${err instanceof Error ? err.message : String(err)}` });
   }
 });
 
