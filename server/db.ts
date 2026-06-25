@@ -79,17 +79,17 @@ export async function loadDB() {
       getCollection<Couple>('couples'),
       getCollection<Message>('messages', 30, 'timestamp'), 
       getCollection<Memory>('memories', 30, 'date'),      
-      getCollection<CalendarEvent>('calendarEvents'),
+      getCollection<CalendarEvent>('calendarEvents', 100),
       getCollection<DailyAnswer>('dailyAnswers', 50, 'timestamp'),
       getCollection<JournalEntry>('journalEntries', 20, 'date'),
-      getCollection<BucketItem>('bucketItems'),
+      getCollection<BucketItem>('bucketItems', 100),
       getCollection<any>('movies'),
       getCollection<any>('moviesHistory', 20, 'watchedAt'),
-      getCollection<LockedLetter>('lockedLetters'),
-      getCollection<HomeDecoration>('homeDecorations'),
+      getCollection<LockedLetter>('lockedLetters', 50),
+      getCollection<HomeDecoration>('homeDecorations', 100),
       getCollection<SecurityLog>('securityLogs', 20, 'timestamp'),
       getCollection<TimelineEvent>('timelineEvents', 30, 'timestamp'),
-      getCollection<any>('sharedTracks')
+      getCollection<any>('sharedTracks', 100)
     ]);
 
     db = {

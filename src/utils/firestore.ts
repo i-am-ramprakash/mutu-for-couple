@@ -1,4 +1,4 @@
-import { initializeApp, getApps } from 'firebase-admin/app';
+import { initializeApp, getApps, getApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue, Query } from 'firebase-admin/firestore';
 import fs from 'fs';
 import path from 'path';
@@ -18,7 +18,8 @@ if (getApps().length === 0) {
   });
 }
 
-export const db = getFirestore();
+const app = getApp();
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
 async function testConnection() {
   try {
