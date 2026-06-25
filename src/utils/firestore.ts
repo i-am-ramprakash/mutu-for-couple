@@ -1,20 +1,5 @@
-import { initializeApp } from 'firebase/app';
-import { 
-  initializeFirestore,
-  getFirestore, 
-  collection, 
-  doc, 
-  getDoc, 
-  getDocFromServer,
-  getDocs, 
-  setDoc, 
-  deleteDoc, 
-  query, 
-  where,
-  limit,
-  orderBy,
-  increment as firestoreIncrement
-} from 'firebase/firestore';
+import { initializeApp, getApps } from 'firebase-admin/app';
+import { getFirestore, FieldValue, Query } from 'firebase-admin/firestore';
 import fs from 'fs';
 import path from 'path';
 
@@ -27,27 +12,20 @@ import {
 const firebaseConfigPath = path.join(process.cwd(), 'firebase-applet-config.json');
 const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, 'utf-8'));
 
-const app = initializeApp(firebaseConfig);
-export const db = firebaseConfig.firestoreDatabaseId
-  ? initializeFirestore(app, {
-      experimentalForceLongPolling: true,
-      ignoreUndefinedProperties: true
-    }, firebaseConfig.firestoreDatabaseId)
-  : initializeFirestore(app, {
-      experimentalForceLongPolling: true,
-      ignoreUndefinedProperties: true
-    });
+if (getApps().length === 0) {
+  initializeApp({
+    projectId: firebaseConfig.projectId,
+  });
+}
+
+export const db = getFirestore();
 
 async function testConnection() {
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-    console.log('[Firestore] Successfully verified connection to Firestore database server.');
+    await db.collection('test').doc('connection').get();
+    console.log('[Firestore Admin] Successfully verified connection to Firestore database server.');
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration.");
-    } else {
-      console.log('[Firestore] Connection verification completed (expected due to default permissions/empty db):', error instanceof Error ? error.message : String(error));
-    }
+    console.error('[Firestore Admin] Connection verification completed (expected due to permissions):', error instanceof Error ? error.message : String(error));
   }
 }
 testConnection();
@@ -75,8 +53,8 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: null,
-      email: null
+      userId: 'server-admin',
+      email: 'server-admin@serviceaccount.gserviceaccount.com'
     },
     operationType,
     path
@@ -86,15 +64,15 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 }
 
 // -------------------------------------------------------------
-// Core Firestore CRUD Helpers
+// Core Firestore CRUD Helpers using Firebase Admin SDK
 // -------------------------------------------------------------
 
 export async function getRecord<T>(collectionName: string, id: string): Promise<T | null> {
   try {
-    const docRef = doc(db, collectionName, id);
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
-      return { id: snap.id, ...snap.data() } as T;
+    const docRef = db.collection(collectionName).doc(id);
+    const snap = await docRef.get();
+    if (snap.exists) {
+      return { id: snap.id, ...snap.data() } as unknown as T;
     }
     return null;
   } catch (error) {
@@ -104,9 +82,8 @@ export async function getRecord<T>(collectionName: string, id: string): Promise<
 
 export async function collectionExists(collectionName: string): Promise<boolean> {
   try {
-    const colRef = collection(db, collectionName);
-    const q = query(colRef, limit(1));
-    const snap = await getDocs(q);
+    const colRef = db.collection(collectionName);
+    const snap = await colRef.limit(1).get();
     return !snap.empty;
   } catch (error) {
     console.error(`[Firestore] Failed to check existence of ${collectionName}:`, error);
@@ -116,31 +93,30 @@ export async function collectionExists(collectionName: string): Promise<boolean>
 
 export async function getCollection<T>(collectionName: string, limitConstraint?: number, orderField?: string): Promise<T[]> {
   try {
-    const colRef = collection(db, collectionName);
-    let q = query(colRef);
+    let colRef: Query = db.collection(collectionName);
     
     if (orderField) {
-      q = query(q, orderBy(orderField, 'desc'));
+      colRef = colRef.orderBy(orderField, 'desc');
     }
     
     if (limitConstraint) {
-      q = query(q, limit(limitConstraint));
+      colRef = colRef.limit(limitConstraint);
     }
     
-    const snap = await getDocs(q);
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }) as T);
+    const snap = await colRef.get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }) as unknown as T);
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, collectionName);
   }
 }
 
-export const increment = firestoreIncrement;
+export const increment = (val: number) => FieldValue.increment(val);
 
 export async function addRecord<T extends { id: string }>(collectionName: string, item: T): Promise<T> {
   try {
-    const docRef = doc(db, collectionName, item.id);
+    const docRef = db.collection(collectionName).doc(item.id);
     const { id, ...data } = item;
-    await setDoc(docRef, data);
+    await docRef.set(data);
     return item;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, `${collectionName}/${item.id}`);
@@ -149,9 +125,9 @@ export async function addRecord<T extends { id: string }>(collectionName: string
 
 export async function updateRecord<T extends { id: string }>(collectionName: string, item: T): Promise<T> {
   try {
-    const docRef = doc(db, collectionName, item.id);
+    const docRef = db.collection(collectionName).doc(item.id);
     const { id, ...data } = item;
-    await setDoc(docRef, data, { merge: true });
+    await docRef.set(data, { merge: true });
     return item;
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `${collectionName}/${item.id}`);
@@ -160,8 +136,8 @@ export async function updateRecord<T extends { id: string }>(collectionName: str
 
 export async function deleteRecord(collectionName: string, id: string): Promise<void> {
   try {
-    const docRef = doc(db, collectionName, id);
-    await deleteDoc(docRef);
+    const docRef = db.collection(collectionName).doc(id);
+    await docRef.delete();
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `${collectionName}/${id}`);
   }
