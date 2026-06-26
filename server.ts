@@ -22,8 +22,12 @@ async function startServer() {
   app.use(express.json({ limit: '3000mb' }));
   app.use(express.urlencoded({ limit: '3000mb', extended: true }));
 
-  // Initialize Database
-  await loadDB();
+  // Initialize Database in the background to avoid blocking server startup and prevent deployment timeouts
+  loadDB().then(() => {
+    console.log('[Firestore] Local database loaded successfully.');
+  }).catch(err => {
+    console.error('[Firestore] Database initialization error:', err);
+  });
 
   // Setup WebSockets
   setupWebSocket(server);

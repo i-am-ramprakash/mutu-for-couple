@@ -47,14 +47,22 @@ router.post('/join', async (req, res) => {
     couple.partner2Id = userId;
     await updateRecord('couples', couple);
 
-    const user = db.users.find(u => u.id === userId);
+    let user = db.users.find(u => u.id === userId);
+    if (!user) {
+      user = await getRecord<User>('users', userId) || undefined;
+      if (user) db.users.push(user);
+    }
     if (user) {
       user.coupleId = couple.id;
       user.partnerId = couple.partner1Id;
       await updateRecord('users', user);
     }
 
-    const partner1 = db.users.find(u => u.id === couple.partner1Id);
+    let partner1 = db.users.find(u => u.id === couple.partner1Id);
+    if (!partner1) {
+      partner1 = await getRecord<User>('users', couple.partner1Id) || undefined;
+      if (partner1) db.users.push(partner1);
+    }
     if (partner1) {
       partner1.partnerId = userId;
       await updateRecord('users', partner1);

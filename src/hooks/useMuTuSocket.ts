@@ -3,6 +3,12 @@ import { WSEvent, Message, User } from '../types';
 
 export function useMuTuSocket(currentUser: User | null, onIncomingEvent: (payload: WSEvent) => void) {
   const socketRef = useRef<WebSocket | null>(null);
+  const onIncomingEventRef = useRef(onIncomingEvent);
+
+  // Keep callback ref updated to avoid stale closures without breaking the connection
+  useEffect(() => {
+    onIncomingEventRef.current = onIncomingEvent;
+  }, [onIncomingEvent]);
 
   const connectSocket = useCallback(() => {
     if (!currentUser) return;
@@ -19,7 +25,7 @@ export function useMuTuSocket(currentUser: User | null, onIncomingEvent: (payloa
     ws.onmessage = (event) => {
       try {
         const payload: WSEvent = JSON.parse(event.data);
-        onIncomingEvent(payload);
+        onIncomingEventRef.current(payload);
       } catch (err) {
         console.error('WS Error:', err);
       }
@@ -32,7 +38,7 @@ export function useMuTuSocket(currentUser: User | null, onIncomingEvent: (payloa
     return () => {
       ws.close();
     };
-  }, [currentUser, onIncomingEvent]);
+  }, [currentUser]);
 
   useEffect(() => {
     const cleanup = connectSocket();
