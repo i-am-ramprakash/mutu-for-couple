@@ -244,6 +244,7 @@ export interface TimelineEvent {
 export type WSEvent =
   | { type: 'connection:init'; userId: string; coupleId?: string }
   | { type: 'chat:message'; message: Message }
+  | { type: 'chat:delivered'; messageId: string; userId: string }
   | { type: 'chat:typing'; userId: string; isTyping: boolean }
   | { type: 'chat:reaction'; messageId: string; reaction: MessageReaction; action: 'add' | 'remove' }
   | { type: 'chat:thumb-kiss-start'; userId: string }

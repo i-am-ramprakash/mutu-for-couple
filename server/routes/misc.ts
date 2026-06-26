@@ -46,7 +46,7 @@ router.post('/user/delete-account', async (req, res) => {
 router.get('/user/profile/:userId', (req, res) => {
   const { userId } = req.params;
   const user = db.users.find(u => u.id === userId);
-  if (user) res.json(user);
+  if (user) res.json({ success: true, user });
   else res.status(404).json({ error: 'User not found' });
 });
 

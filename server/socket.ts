@@ -2,6 +2,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { Server } from 'http';
 import { db } from './db';
 import { WSEvent } from '../src/types';
+import { addRecord, updateRecord } from '../src/utils/firestore';
 
 export const clientSockets = new Map<string, WebSocket>();
 export const activeChatUsers = new Set<string>();
@@ -18,7 +19,7 @@ export function setupWebSocket(server: Server) {
   wss.on('connection', (ws) => {
     let currentUserId: string | null = null;
 
-    ws.on('message', (message) => {
+    ws.on('message', async (message) => {
       try {
         const payload: WSEvent = JSON.parse(message.toString());
         
@@ -30,22 +31,50 @@ export function setupWebSocket(server: Server) {
             if (user) user.online = true;
             broadcastPartnerStatus(currentUserId, true);
           }
-        }
-        
-        // Handle other event types
-        if (payload.type === 'chat:typing') {
-          const partnerId = getPartnerId(payload.userId);
-          if (partnerId) sendToUser(partnerId, payload);
+          return;
         }
 
+        // Persist message on server if it's sent via WS
         if (payload.type === 'chat:message') {
-           const partnerId = getPartnerId(payload.message.senderId);
-           if (partnerId) sendToUser(partnerId, payload);
+          try {
+            await addRecord('messages', payload.message);
+            db.messages.push(payload.message);
+          } catch (err) {
+            console.error('[WS Server] Failed to persist message to Firestore:', err);
+          }
         }
 
-        if (payload.type === 'chat:thumb-kiss-start' || payload.type === 'chat:thumb-kiss-end') {
-           const partnerId = getPartnerId(payload.userId);
-           if (partnerId) sendToUser(partnerId, payload);
+        // Persist delivery status update if received
+        if (payload.type === 'chat:delivered') {
+          try {
+            const msg = db.messages.find(m => m.id === payload.messageId);
+            if (msg && msg.status !== 'seen') {
+              msg.status = 'delivered';
+              await updateRecord('messages', msg);
+            }
+          } catch (err) {
+            console.error('[WS Server] Failed to update message delivery in Firestore:', err);
+          }
+        }
+
+        // Universal Partner Signaling Forwarder (for movies, calls, reactions, status, etc.)
+        if (currentUserId) {
+          const partnerId = getPartnerId(currentUserId);
+          if (partnerId) {
+            sendToUser(partnerId, payload);
+          }
+        } else {
+          // Fallback if connection:init wasn't completed or state has desynced
+          const senderId = (payload as any).userId || 
+                           ((payload as any).message && (payload as any).message.senderId) ||
+                           (payload as any).callerId ||
+                           (payload as any).calleeId;
+          if (senderId) {
+            const partnerId = getPartnerId(senderId);
+            if (partnerId) {
+              sendToUser(partnerId, payload);
+            }
+          }
         }
 
       } catch (err) {

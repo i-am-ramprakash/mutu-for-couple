@@ -30,7 +30,7 @@ router.post('/generate-invite', async (req, res) => {
     user.coupleId = newCouple.id;
     await updateRecord('users', user);
 
-    res.json(newCouple);
+    res.json({ success: true, couple: newCouple, user });
   } catch (err) {
     res.status(500).json({ error: 'Failed to generate invite' });
   }
@@ -60,7 +60,7 @@ router.post('/join', async (req, res) => {
       await updateRecord('users', partner1);
     }
 
-    res.json(couple);
+    res.json({ success: true, couple, user });
   } catch (err) {
     res.status(500).json({ error: 'Failed to join couple' });
   }
@@ -74,7 +74,7 @@ router.post('/update-profile', async (req, res) => {
 
     Object.assign(user, updates);
     await updateRecord('users', user);
-    res.json(user);
+    res.json({ success: true, user });
   } catch (err) {
     res.status(500).json({ error: 'Failed to update profile' });
   }

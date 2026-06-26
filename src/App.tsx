@@ -187,17 +187,6 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'instant' as any });
   }, [activeSection]);
 
-  // Mark in-app chat messages as read locally when in the chat lounge
-  useEffect(() => {
-    if (activeSection === 'chat' && currentUser) {
-      setMessages(prev => prev.map(m => {
-        if (m.senderId !== currentUser.id && !m.read) {
-          return { ...m, read: true, status: 'seen' };
-        }
-        return m;
-      }));
-    }
-  }, [activeSection, currentUser]);
   const [showExitBanner, setShowExitBanner] = useState(false);
   const [notifFilter, setNotifFilter] = useState<'all' | 'unread'>('all');
 
@@ -623,7 +612,7 @@ export default function App() {
       const res = await fetch(`/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: user.email })
+        body: JSON.stringify({ uid: user.id, email: user.email })
       });
       if (res.ok) {
         const freshUser = await res.json();
@@ -985,7 +974,27 @@ export default function App() {
         fetchStatsAndAnswers();
         if (payload.message.senderId !== user.id) {
           playSweetMessageSound();
+          // Send delivered status confirmation back to partner
+          try {
+            sendRealTimeEvent({
+              type: 'chat:delivered',
+              messageId: payload.message.id,
+              userId: user.id
+            });
+          } catch (err) {
+            console.warn('[WS Client] Failed to send chat:delivered status confirmation:', err);
+          }
         }
+        break;
+      }
+
+      case 'chat:delivered': {
+        setMessages((prev) => prev.map(m => {
+          if (m.id === payload.messageId && m.status !== 'seen') {
+            return { ...m, status: 'delivered' };
+          }
+          return m;
+        }));
         break;
       }
 
@@ -1486,6 +1495,41 @@ export default function App() {
       unsubscribes.forEach(unsub => unsub());
     };
   }, [currentUser?.id, currentUser?.coupleId, currentUser?.partnerId]);
+
+  // Mark in-app chat messages as read/seen in Firestore & notify partner
+  useEffect(() => {
+    if (activeSection === 'chat' && currentUser && messages.length > 0) {
+      const unreadMsgs = messages.filter(m => m.senderId !== currentUser.id && !m.read);
+      if (unreadMsgs.length > 0) {
+        // Update locally
+        setMessages(prev => prev.map(m => {
+          if (m.senderId !== currentUser.id && !m.read) {
+            return { ...m, read: true, status: 'seen' };
+          }
+          return m;
+        }));
+
+        // Update in Firestore
+        unreadMsgs.forEach(async (m) => {
+          try {
+            await updateDoc(doc(db, 'messages', m.id), { read: true, status: 'seen' });
+          } catch (err) {
+            console.warn('[Firestore] Failed to mark message as read:', err);
+          }
+        });
+
+        // Notify partner via WebSockets
+        try {
+          sendRealTimeEvent({
+            type: 'chat:seen-update',
+            userId: currentUser.id
+          });
+        } catch (err) {
+          console.warn('[WebSocket] Failed to send chat:seen-update:', err);
+        }
+      }
+    }
+  }, [activeSection, currentUser, messages, sendRealTimeEvent]);
 
   // Minor isolated data refreshers supporting WebSocket notifications
   // 3. Messaging Callbacks

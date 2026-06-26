@@ -55,14 +55,29 @@ router.post('/register', async (req, res) => {
 router.post('/login', async (req, res) => {
   const { uid, email } = req.body;
   try {
-    let user = db.users.find(u => u.id === uid);
-    if (!user) {
-      user = await getRecord<User>('users', uid) || undefined;
-      if (user) {
-        db.users.push(user);
+    let user: User | undefined = undefined;
+    
+    // Try to find by uid first if provided
+    if (uid) {
+      user = db.users.find(u => u.id === uid);
+      if (!user) {
+        user = await getRecord<User>('users', uid) || undefined;
+        if (user) {
+          db.users.push(user);
+        }
       }
     }
+
+    // Fallback to searching by email if user not found or uid wasn't provided
+    if (!user && email) {
+      user = db.users.find(u => u.email?.toLowerCase() === email.toLowerCase());
+    }
+
     if (!user) {
+      if (!uid) {
+        return res.status(400).json({ error: 'User ID is required for login/registration fallback' });
+      }
+
       console.log(`[Login] User ${uid} not found in Firestore. Creating fallback user profile.`);
       const newUser: User = {
         id: uid,
