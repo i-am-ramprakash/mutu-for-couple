@@ -3,7 +3,8 @@
   "appId": "1:584293425114:web:d62641e74bc3a51b83eae3",
   "apiKey": "AIzaSyBewUajMLmixL2JRBqsQyInQCqfJTydcE4",
   "authDomain": "ldr-app-forcouple.firebaseapp.com",
-  "firestoreDatabaseId": "(default)",
+  "firestoreDatabaseId": "ai-studio-mutu-6d209b35-ab29-40b2-b0d9-33964eaed261",
   "storageBucket": "ldr-app-forcouple.firebasestorage.app",
-  "messagingSenderId": "584293425114"
+  "messagingSenderId": "584293425114",
+  "measurementId": ""
 }
