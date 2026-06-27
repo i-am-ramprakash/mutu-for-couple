@@ -78,6 +78,9 @@ router.get('/movies/history', (req, res) => {
 
 router.post('/movies/history', async (req, res) => {
   const entry = req.body;
+  if (!entry.id) {
+    entry.id = 'mvh_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  }
   try {
     await addRecord('moviesHistory', entry);
     if (!db.moviesHistory) db.moviesHistory = [];
@@ -121,6 +124,9 @@ router.get('/couple/timeline', (req, res) => {
 
 router.post('/couple/timeline', async (req, res) => {
   const event = req.body;
+  if (!event.id) {
+    event.id = 'tle_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  }
   try {
     await addRecord('timelineEvents', event);
     if (!db.timelineEvents) db.timelineEvents = [];
@@ -139,6 +145,9 @@ router.get('/couple/music', (req, res) => {
 
 router.post('/couple/music/add', async (req, res) => {
   const track = req.body;
+  if (!track.id) {
+    track.id = 'trk_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  }
   try {
     await addRecord('sharedTracks', track);
     if (!db.sharedTracks) db.sharedTracks = [];

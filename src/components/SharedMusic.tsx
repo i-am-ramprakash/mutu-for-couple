@@ -32,7 +32,7 @@ export default function SharedMusic({ user, onBack }: SharedMusicProps) {
 
   // Local audio players state
   const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
-  const [audioObj, setAudioObj] = useState<HTMLAudioElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const fetchTracks = async () => {
     setLoading(true);
@@ -93,8 +93,8 @@ export default function SharedMusic({ user, onBack }: SharedMusicProps) {
       fetchTracks();
     }
     return () => {
-      if (audioObj) {
-        audioObj.pause();
+      if (audioRef.current) {
+        audioRef.current.pause();
       }
     };
   }, [user.coupleId]);
@@ -134,30 +134,32 @@ export default function SharedMusic({ user, onBack }: SharedMusicProps) {
   const handleTogglePlay = (track: Track) => {
     if (playingTrackId === track.id) {
       // Pause
-      if (audioObj) {
-        audioObj.pause();
+      if (audioRef.current) {
+        audioRef.current.pause();
       }
       setPlayingTrackId(null);
     } else {
       // Stop current
-      if (audioObj) {
-        audioObj.pause();
+      if (audioRef.current) {
+        audioRef.current.pause();
       }
 
       // Play new
       const sound = new Audio(track.url);
-      sound.play().catch(err => {
-        alert("The browser is preventing auto-play. Please interact with the page first or verify the link is a public streaming audio MP3.");
-      });
       sound.loop = true;
-      setAudioObj(sound);
+      audioRef.current = sound;
       setPlayingTrackId(track.id);
+
+      sound.play().catch(err => {
+        console.warn('Playback blocked by browser autoplay protection:', err);
+        setPlayingTrackId(null);
+      });
     }
   };
 
   const handleRemoveTrack = async (trackId: string) => {
     if (playingTrackId === trackId) {
-      if (audioObj) audioObj.pause();
+      if (audioRef.current) audioRef.current.pause();
       setPlayingTrackId(null);
     }
 

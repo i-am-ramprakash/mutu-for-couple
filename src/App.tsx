@@ -86,6 +86,11 @@ export default function App() {
     }
   }, [currentUser?.appTheme, setTheme]);
 
+  // Swipe and Logout Confirmation states
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const [touchStartY, setTouchStartY] = useState<number | null>(null);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
   // Navigation state: 'dashboard' | 'chat' | 'movie' | 'memories' | 'calendar' | 'daily' | 'journal'
   const [activeSection, setActiveSection] = useState<string>(() => {
     const hash = window.location.hash.slice(1);
@@ -2352,6 +2357,42 @@ export default function App() {
     }
   }, [currentUser?.coupleId, handleRefreshUser]);
 
+  // Touch Swipe Handlers for native-feeling mobile gestures
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setTouchStartX(e.touches[0].clientX);
+    setTouchStartY(e.touches[0].clientY);
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX === null || touchStartY === null) return;
+    const diffX = touchStartX - e.changedTouches[0].clientX;
+    const diffY = touchStartY - e.changedTouches[0].clientY;
+    
+    // Reset
+    setTouchStartX(null);
+    setTouchStartY(null);
+
+    // Ignore short swipes or vertical scroll sweeps
+    if (Math.abs(diffX) < 140 || Math.abs(diffY) > 80) return;
+
+    if (diffX > 0) {
+      // Swiped Left (right to left) -> Trigger Logout Sheet on Dashboard
+      if (activeSection === 'dashboard' || !activeSection) {
+        setShowLogoutConfirm(true);
+        playSweetSparkSound();
+      }
+    } else {
+      // Swiped Right (left to right) -> Back to Home from rooms, or go to ChatRoom from Home
+      if (activeSection && activeSection !== 'dashboard' && activeSection !== 'chat') {
+        handleBack();
+        playSweetMessageSound();
+      } else if (activeSection === 'dashboard' || !activeSection) {
+        navigateToSection('chat');
+        playSweetMessageSound();
+      }
+    }
+  };
+
   // Lock page scrolling when in mobile chat view to ensure no browser header scroll push
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -2400,6 +2441,8 @@ export default function App() {
           ? (isKeyboardOpen ? 'pb-0' : 'pb-16 md:pb-20') 
           : ''
       }`}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
       style={activeSection === 'chat' ? { 
         height: viewportHeight ? `${viewportHeight}px` : '100vh',
         maxHeight: viewportHeight ? `${viewportHeight}px` : '100vh',
@@ -3391,6 +3434,40 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Slide / Swipe Logout Confirmation popup */}
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4" id="logout_confirm_modal">
+          <div className="bg-white dark:bg-stone-900 border border-stone-100 dark:border-stone-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-6 text-center animate-in fade-in zoom-in-95 duration-200">
+            <div className="mx-auto w-16 h-16 bg-rose-50 dark:bg-rose-950/30 text-rose-500 rounded-full flex items-center justify-center">
+              <LogOut size={28} />
+            </div>
+            
+            <div className="space-y-2">
+              <h3 className="font-serif font-bold text-xl text-stone-850 dark:text-stone-150">Ready to Log Out?</h3>
+              <p className="text-sm text-stone-505 dark:text-stone-400">
+                You can swipe back to stay in your shared nest, or tap confirm below to exit.
+              </p>
+            </div>
+            
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setShowLogoutConfirm(false); playSweetMessageSound(); }}
+                className="flex-1 py-3 px-4 bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700/80 text-stone-600 dark:text-stone-300 font-semibold rounded-2xl transition cursor-pointer"
+              >
+                Stay here
+              </button>
+              <button
+                onClick={() => { setShowLogoutConfirm(false); handleLogout(); }}
+                className="flex-1 py-3 px-4 bg-rose-500 hover:bg-rose-600 text-white font-semibold rounded-2xl transition cursor-pointer shadow-lg shadow-rose-500/20"
+                id="btn_confirm_logout"
+              >
+                Log Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -5,13 +5,18 @@ import { User } from '../../src/types';
 
 const router = Router();
 
-// Helper: merges live partner info into user object so both devices stay in sync
 export function populatePartnerFields(user: User): any {
   if (!user) return user;
+  const couple = user.coupleId ? db.couples.find(c => c.id === user.coupleId) : null;
+  const anniversaryDate = couple?.anniversaryDate || user.anniversaryDate || '';
   const partner = user.partnerId ? db.users.find(u => u.id === user.partnerId) : null;
+  const baseUser = {
+    ...user,
+    anniversaryDate
+  };
   if (partner) {
     return {
-      ...user,
+      ...baseUser,
       partnerName: partner.name || '',
       partnerPhoto: partner.profilePhoto || '🧡',
       partnerCity: partner.locationCity || '',
@@ -22,10 +27,12 @@ export function populatePartnerFields(user: User): any {
       partnerSleepMode: partner.isSleepMode || false,
       partnerOnline: partner.online || false,
       partnerLastActiveTime: partner.lastActiveTime || 0,
-      partnerPresenceStatus: partner.currentPresenceStatus || ''
+      partnerPresenceStatus: partner.currentPresenceStatus || '',
+      partnerHeartbeat: partner.lastActiveTime || 0,
+      partnerBirthday: partner.birthday || ''
     };
   }
-  return user;
+  return baseUser;
 }
 
 router.post('/google', async (req, res) => {

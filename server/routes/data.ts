@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db, saveDB } from '../db';
+import { db, saveDB, dailyQuestions } from '../db';
 import { addRecord, updateRecord, deleteRecord } from '../../src/utils/firestore';
 
 const router = Router();
@@ -21,6 +21,9 @@ router.get('/memories', (req, res) => {
 
 router.post('/memories', async (req, res) => {
   const memory = req.body;
+  if (!memory.id) {
+    memory.id = 'mem_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  }
   try {
     await addRecord('memories', memory);
     db.memories.push(memory);
@@ -39,6 +42,9 @@ router.get('/calendar', (req, res) => {
 
 router.post('/calendar', async (req, res) => {
   const event = req.body;
+  if (!event.id) {
+    event.id = 'ev_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  }
   try {
     await addRecord('calendarEvents', event);
     db.calendarEvents.push(event);
@@ -57,6 +63,9 @@ router.get('/bucket-list', (req, res) => {
 
 router.post('/bucket-list', async (req, res) => {
   const item = req.body;
+  if (!item.id) {
+    item.id = 'bkt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  }
   try {
     await addRecord('bucketItems', item);
     if (!db.bucketList) db.bucketList = [];
@@ -88,6 +97,9 @@ router.get('/journal', (req, res) => {
 
 router.post('/journal', async (req, res) => {
   const entry = req.body;
+  if (!entry.id) {
+    entry.id = 'jrn_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  }
   try {
     await addRecord('journalEntries', entry);
     db.journalEntries.push(entry);
@@ -106,6 +118,9 @@ router.get('/locked-letters', (req, res) => {
 
 router.post('/locked-letters', async (req, res) => {
   const letter = req.body;
+  if (!letter.id) {
+    letter.id = 'let_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  }
   try {
     await addRecord('lockedLetters', letter);
     db.lockedLetters.push(letter);
@@ -132,7 +147,6 @@ router.post('/locked-letters/open', async (req, res) => {
 router.get('/daily-question', (req, res) => {
   const now = new Date();
   const index = (now.getFullYear() + now.getMonth() + now.getDate()) % 10;
-  const { dailyQuestions } = require('../db');
   res.json(dailyQuestions[index]);
 });
 
@@ -144,6 +158,9 @@ router.get('/daily-answers', (req, res) => {
 
 router.post('/daily-answers', async (req, res) => {
   const answer = req.body;
+  if (!answer.id) {
+    answer.id = 'ans_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  }
   try {
     await addRecord('dailyAnswers', answer);
     db.dailyAnswers.push(answer);

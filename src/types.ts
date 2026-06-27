@@ -34,6 +34,7 @@ export interface User {
   
   appTheme?: 'light' | 'dark' | 'auto';
   chatBackground?: string;
+  isSleepMode?: boolean;
 
   // Emotional Presence, Streaks, Customizations
   currentPresenceStatus?: string; // e.g. "Thinking about you 🌙"
