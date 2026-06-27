@@ -116,7 +116,7 @@ router.post('/locked-letters', async (req, res) => {
 });
 
 router.post('/locked-letters/open', async (req, res) => {
-  const { id } = req.body;
+  const id = req.body.id || req.body.letterId;
   const letter = db.lockedLetters.find(l => l.id === id);
   if (letter) {
     letter.isOpened = true;

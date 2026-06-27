@@ -17,7 +17,7 @@ export default function SafetyCenter({ user, onBack, onLogout }: SafetyCenterPro
   const fetchLogs = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/couple/security-logs?coupleId=${user.coupleId}`);
+      const res = await fetch(`/api/user/security-logs?userId=${user.id}`);
       if (res.ok) {
         const data = await res.json();
         setLogs(data);
@@ -38,7 +38,7 @@ export default function SafetyCenter({ user, onBack, onLogout }: SafetyCenterPro
   const handleExportData = async () => {
     setExporting(true);
     try {
-      const res = await fetch(`/api/couple/export-data?userId=${user.id}`);
+      const res = await fetch(`/api/user/export-data?userId=${user.id}`);
       if (res.ok) {
         const blob = await res.blob();
         const downloadUrl = window.URL.createObjectURL(blob);
@@ -66,7 +66,7 @@ export default function SafetyCenter({ user, onBack, onLogout }: SafetyCenterPro
 
     setDeleting(true);
     try {
-      const res = await fetch('/api/couple/delete-profile', {
+      const res = await fetch('/api/user/delete-account', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.id })

@@ -37,7 +37,7 @@ async function startServer() {
   app.use('/api/auth', authRouter);
   app.use('/api/couple', coupleRouter);
   app.use('/api/gemini', geminiRouter);
-  app.use('/api/data', dataRouter);
+  app.use('/api', dataRouter);
   app.use('/api', miscRouter);
 
   // Vite / Static Serving

@@ -136,4 +136,44 @@ router.post('/couple/music/add', async (req, res) => {
   }
 });
 
+router.post('/couple/music/remove', async (req, res) => {
+  const { coupleId, trackId } = req.body;
+  try {
+    await deleteRecord('sharedTracks', trackId);
+    if (db.sharedTracks) {
+      db.sharedTracks = db.sharedTracks.filter(t => t.id !== trackId);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to remove music' });
+  }
+});
+
+router.post('/audio/upload', (req, res) => {
+  const chunks: Buffer[] = [];
+  req.on('data', (chunk) => {
+    chunks.push(chunk);
+  });
+  req.on('end', async () => {
+    try {
+      const buffer = Buffer.concat(chunks);
+      const filename = decodeURIComponent((req.headers['x-filename'] as string) || 'track.mp3');
+      const base64 = buffer.toString('base64');
+      const mimeType = filename.endsWith('.wav') ? 'audio/wav' : 'audio/mpeg';
+      const dataUrl = `data:${mimeType};base64,${base64}`;
+      
+      res.json({ url: dataUrl });
+    } catch (err) {
+      console.error('Upload processing error:', err);
+      res.status(500).json({ error: 'Failed to process audio' });
+    }
+  });
+});
+
+router.get('/couple/call-logs', (req, res) => {
+  const { coupleId } = req.query;
+  const logs = (db.callLogs || []).filter(c => c.coupleId === coupleId);
+  res.json(logs);
+});
+
 export default router;

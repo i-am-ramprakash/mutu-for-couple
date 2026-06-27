@@ -73,7 +73,7 @@ export async function loadDB() {
       users, couples, messages, memories, calendarEvents, 
       dailyAnswers, journalEntries, bucketList, movies, 
       moviesHistory, lockedLetters, decorations, securityLogs, 
-      timelineEvents, sharedTracks
+      timelineEvents, sharedTracks, callLogs
     ] = await Promise.all([
       getCollection<User>('users'),
       getCollection<Couple>('couples'),
@@ -89,7 +89,8 @@ export async function loadDB() {
       getCollection<HomeDecoration>('homeDecorations', 100),
       getCollection<SecurityLog>('securityLogs', 20, 'timestamp'),
       getCollection<TimelineEvent>('timelineEvents', 30, 'timestamp'),
-      getCollection<any>('sharedTracks', 100)
+      getCollection<any>('sharedTracks', 100),
+      getCollection<any>('callLogs', 100, 'timestamp')
     ]);
 
     db = {
@@ -107,7 +108,8 @@ export async function loadDB() {
       decorations: decorations || [],
       securityLogs: securityLogs || [],
       timelineEvents: timelineEvents || [],
-      sharedTracks: sharedTracks || []
+      sharedTracks: sharedTracks || [],
+      callLogs: callLogs || []
     };
 
     console.log('[Firestore] Database loaded successfully.');

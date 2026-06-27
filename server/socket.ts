@@ -64,6 +64,28 @@ export function setupWebSocket(server: Server, getViteServer?: () => any) {
           }
         }
 
+        // Persist call connection logs if call is initiated
+        if (payload.type === 'call:dial') {
+          try {
+            const senderId = currentUserId || (payload as any).callerId;
+            const user = db.users.find(u => u.id === senderId);
+            if (user && user.coupleId) {
+              const callLog = {
+                id: 'call_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+                coupleId: user.coupleId,
+                type: (payload as any).mode || 'voice',
+                timestamp: Date.now()
+              };
+              await addRecord('callLogs', callLog);
+              if (!db.callLogs) db.callLogs = [];
+              db.callLogs.push(callLog);
+              console.log('[WS Server] Call log persisted:', callLog);
+            }
+          } catch (err) {
+            console.error('[WS Server] Failed to persist call log:', err);
+          }
+        }
+
         // Universal Partner Signaling Forwarder (for movies, calls, reactions, status, etc.)
         if (currentUserId) {
           const partnerId = getPartnerId(currentUserId);

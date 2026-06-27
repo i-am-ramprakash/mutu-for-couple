@@ -36,7 +36,7 @@ export default function SecretVault({ user, onBack }: SecretVaultProps) {
   const fetchLetters = async () => {
     if (!user.coupleId) return;
     try {
-      const res = await fetch(`/api/couple/locked-letters?coupleId=${user.coupleId}`);
+      const res = await fetch(`/api/locked-letters?coupleId=${user.coupleId}`);
       if (res.ok) {
         const data = await res.json();
         setLetters(data);
@@ -80,7 +80,7 @@ export default function SecretVault({ user, onBack }: SecretVaultProps) {
       const enc = await encryptMessage(content, key);
 
       // 2. Transmit ciphertext to server
-      const res = await fetch('/api/couple/locked-letters', {
+      const res = await fetch('/api/locked-letters', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -123,10 +123,10 @@ export default function SecretVault({ user, onBack }: SecretVaultProps) {
     // Call server to mark as opened once
     if (!letter.isOpened) {
       try {
-        await fetch('/api/couple/locked-letters/open', {
+        await fetch('/api/locked-letters/open', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ letterId: letter.id, userId: user.id })
+          body: JSON.stringify({ id: letter.id, letterId: letter.id, userId: user.id })
         });
         // Slower local state update is fine, update to preserve local open indicator
         setLetters(prev => prev.map(l => l.id === letter.id ? { ...l, isOpened: true } : l));

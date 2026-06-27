@@ -46,7 +46,7 @@ export default function RelationshipTimeline({ user, onBack }: RelationshipTimel
 
     setIsSyncing(true);
     try {
-      const res = await fetch('/api/couple/timeline/add', {
+      const res = await fetch('/api/couple/timeline', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
