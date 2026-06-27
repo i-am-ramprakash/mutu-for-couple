@@ -12,82 +12,103 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if respectsLimit(50);
+      allow get: if true;
+      allow list: if respectsLimit(50);
       allow create, update: if true;
       allow delete: if false;
     }
 
     match /couples/{coupleId} {
-      allow read: if respectsLimit(10);
+      allow get: if true;
+      allow list: if respectsLimit(10);
       allow create, update: if true;
       allow delete: if false;
     }
 
     match /messages/{messageId} {
-      allow read: if respectsLimit(50);
+      allow get: if true;
+      allow list: if respectsLimit(50);
       allow create: if true;
       allow update: if true;
       allow delete: if false;
     }
 
     match /memories/{memoryId} {
-       allow read: if respectsLimit(50);
+       allow get: if true;
+       allow list: if respectsLimit(50);
        allow write: if true;
     }
 
     match /calendarEvents/{eventId} {
-      allow read: if respectsLimit(100);
+      allow get: if true;
+      allow list: if respectsLimit(100);
       allow write: if true;
     }
 
     match /dailyAnswers/{answerId} {
-      allow read: if respectsLimit(100);
+      allow get: if true;
+      allow list: if respectsLimit(100);
       allow write: if true;
     }
 
     match /journalEntries/{entryId} {
-      allow read: if respectsLimit(50);
+      allow get: if true;
+      allow list: if respectsLimit(50);
       allow write: if true;
     }
 
     match /bucketItems/{itemId} {
-      allow read: if respectsLimit(100);
+      allow get: if true;
+      allow list: if respectsLimit(100);
       allow write: if true;
     }
 
     match /lockedLetters/{letterId} {
-      allow read: if respectsLimit(50);
+      allow get: if true;
+      allow list: if respectsLimit(50);
       allow write: if true;
     }
 
     match /homeDecorations/{decorationId} {
-      allow read: if respectsLimit(100);
+      allow get: if true;
+      allow list: if respectsLimit(100);
       allow write: if true;
     }
 
     match /securityLogs/{logId} {
-      allow read: if respectsLimit(50);
+      allow get: if true;
+      allow list: if respectsLimit(50);
       allow write: if true;
     }
 
     match /timelineEvents/{eventId} {
-      allow read: if respectsLimit(50);
+      allow get: if true;
+      allow list: if respectsLimit(50);
       allow write: if true;
     }
 
     match /sharedTracks/{trackId} {
-      allow read: if respectsLimit(100);
+      allow get: if true;
+      allow list: if respectsLimit(100);
+      allow write: if true;
+    }
+
+    match /callLogs/{logId} {
+      allow get: if true;
+      allow list: if respectsLimit(100);
       allow write: if true;
     }
 
     match /movies/{movieId} {
-      allow read: if respectsLimit(100);
+      allow get: if true;
+      allow list: if respectsLimit(100);
       allow create, update: if true;
       allow delete: if false;
     }
 
     match /moviesHistory/{historyId} {
-      allow read: if respectsLimit(50);
+      allow get: if true;
+      allow list: if respectsLimit(50);
       allow write: if true;
     }
   }
