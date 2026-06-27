@@ -5,6 +5,7 @@ import {
   Calendar, Camera, Loader2, CalendarRange, Heart 
 } from 'lucide-react';
 import { User, Memory } from '../types';
+import { compressImage } from '../utils/image';
 
 interface MemoryWallProps {
   user: User;
@@ -33,8 +34,16 @@ export default function MemoryWall({ user, onBack, memories, onAddMemory }: Memo
       }
       setError('');
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setImageBase64(reader.result as string);
+      reader.onloadend = async () => {
+        try {
+          const originalBase64 = reader.result as string;
+          // Compress Polaroid base64 photo to a max width/height of 1200px at 0.7 quality
+          const compressed = await compressImage(originalBase64, 1200, 1200, 0.7);
+          setImageBase64(compressed);
+        } catch (compressErr) {
+          console.warn('Image compression failed, falling back to original:', compressErr);
+          setImageBase64(reader.result as string);
+        }
       };
       reader.onerror = () => {
         setError('Failed to process image file.');

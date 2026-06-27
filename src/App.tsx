@@ -661,6 +661,13 @@ export default function App() {
     return sent;
   }, [currentUser?.id]);
 
+  const handleBroadcastProfileUpdate = useCallback(() => {
+    sendRealTimeEvent({
+      type: 'state:update',
+      section: 'profile'
+    });
+  }, [sendRealTimeEvent]);
+
   const reconnectCall = async () => {
     try {
       const pc = peerConnectionRef.current;
@@ -1129,7 +1136,7 @@ export default function App() {
           fetchStatsAndAnswers(); // Keep this as stats are computed on server
         }
         if (payload.section === 'profile' || payload.section === 'presence') {
-          // handleRefreshUser(); // Optimized: Handled by Firestore onSnapshot
+          handleRefreshUser();
         }
         if (payload.section === 'sleep_on') {
           setIsSleepMode(true);
@@ -2492,6 +2499,7 @@ export default function App() {
             currentUser={currentUser}
             onBack={handleBack}
             onRefreshUser={handleRefreshUser}
+            onBroadcastProfileUpdate={handleBroadcastProfileUpdate}
           />
         );
       default:
@@ -2508,6 +2516,7 @@ export default function App() {
             onSectionSelect={navigateToSection}
             onLogout={handleLogout}
             onRefreshUser={handleRefreshUser}
+            onBroadcastProfileUpdate={handleBroadcastProfileUpdate}
           />
         );
     }

@@ -7,12 +7,14 @@ import {
 } from 'lucide-react';
 import { User } from '../types';
 import { playSweetSparkSound, playSweetHeartbeat, playSweetMessageSound } from '../utils/audio';
+import { compressImage } from '../utils/image';
 
 interface UserProfileProps {
   currentUser: User;
   profileUserId: string;
   onBack: () => void;
   onRefreshUser: () => void;
+  onBroadcastProfileUpdate?: () => void;
 }
 
 // Default cover image placeholder
@@ -43,7 +45,7 @@ const STANDARD_MOODS = [
 
 const StandardEmojis = ["❤️", "💖", "✨", "🦋", "🌸", "🌹", "👑", "🌙", "🥂", "🍿", "🍕", "✈️", "🎵", "💬", "🧸", "💑", "🔮", "🌅", "💘", "💋"];
 
-export default function UserProfile({ currentUser, profileUserId, onBack, onRefreshUser }: UserProfileProps) {
+export default function UserProfile({ currentUser, profileUserId, onBack, onRefreshUser, onBroadcastProfileUpdate }: UserProfileProps) {
   const isSelf = profileUserId === currentUser.id;
   
   const [profileData, setProfileData] = useState<any>(null);
@@ -196,6 +198,9 @@ export default function UserProfile({ currentUser, profileUserId, onBack, onRefr
         setIsEditing(false);
         playSweetSparkSound();
         onRefreshUser();
+        if (onBroadcastProfileUpdate) {
+          onBroadcastProfileUpdate();
+        }
         // Refresh local data to be correct
         fetchProfile();
       }
@@ -212,9 +217,15 @@ export default function UserProfile({ currentUser, profileUserId, onBack, onRefr
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
-      setProfileData({ ...profileData, coverPhoto: reader.result as string });
-      playSweetHeartbeat();
+    reader.onload = async () => {
+      try {
+        const compressed = await compressImage(reader.result as string, 800, 800, 0.7);
+        setProfileData({ ...profileData, coverPhoto: compressed });
+        playSweetHeartbeat();
+      } catch (err) {
+        console.warn('Cover photo compression failed:', err);
+        setProfileData({ ...profileData, coverPhoto: reader.result as string });
+      }
     };
     reader.readAsDataURL(file);
   };
@@ -223,9 +234,15 @@ export default function UserProfile({ currentUser, profileUserId, onBack, onRefr
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
-      setProfileData({ ...profileData, profilePhoto: reader.result as string });
-      playSweetHeartbeat();
+    reader.onload = async () => {
+      try {
+        const compressed = await compressImage(reader.result as string, 800, 800, 0.7);
+        setProfileData({ ...profileData, profilePhoto: compressed });
+        playSweetHeartbeat();
+      } catch (err) {
+        console.warn('Avatar compression failed:', err);
+        setProfileData({ ...profileData, profilePhoto: reader.result as string });
+      }
     };
     reader.readAsDataURL(file);
   };
@@ -615,9 +632,9 @@ export default function UserProfile({ currentUser, profileUserId, onBack, onRefr
                     onChange={e => setProfileData({ ...profileData, locationTimezone: e.target.value })}
                     className="mt-1 px-2 py-1 bg-stone-900 border border-stone-800 rounded-lg text-stone-200 text-xs w-full focus:outline-none"
                   >
-                    <option value="">Select timezone</option>
+                    <option value="" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">Select timezone</option>
                     {STANDARD_TIMEZONES.map(tz => (
-                      <option key={tz} value={tz}>{tz}</option>
+                      <option key={tz} value={tz} className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">{tz}</option>
                     ))}
                   </select>
                 ) : (
@@ -841,12 +858,12 @@ export default function UserProfile({ currentUser, profileUserId, onBack, onRefr
                   onChange={e => setProfileData({ ...profileData, checkInLoveLanguage: e.target.value })}
                   className="w-full bg-stone-900 border border-stone-800 text-xs px-2.5 py-1.5 rounded-xl text-stone-200 outline-none focus:outline-none"
                 >
-                  <option value="">Select language</option>
-                  <option value="Words of Affirmation 💬">Words of Affirmation 💬</option>
-                  <option value="Quality Time ⏳">Quality Time ⏳</option>
-                  <option value="Physical Touch 💑">Physical Touch 💑</option>
-                  <option value="Acts of Service 🛠️">Acts of Service 🛠️</option>
-                  <option value="Receiving Gifts 🎁">Receiving Gifts 🎁</option>
+                  <option value="" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">Select language</option>
+                  <option value="Words of Affirmation 💬" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">Words of Affirmation 💬</option>
+                  <option value="Quality Time ⏳" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">Quality Time ⏳</option>
+                  <option value="Physical Touch 💑" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">Physical Touch 💑</option>
+                  <option value="Acts of Service 🛠️" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">Acts of Service 🛠️</option>
+                  <option value="Receiving Gifts 🎁" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">Receiving Gifts 🎁</option>
                 </select>
               ) : (
                 <p className="text-xs font-medium text-stone-200">{profileData.checkInLoveLanguage || 'Physical Touch 💑'}</p>
@@ -978,9 +995,15 @@ export default function UserProfile({ currentUser, profileUserId, onBack, onRefr
                         const file = e.target.files?.[0];
                         if (file) {
                           const reader = new FileReader();
-                          reader.onload = () => {
-                            setProfileData({ ...profileData, favPhoto: reader.result as string });
-                            playSweetHeartbeat();
+                          reader.onload = async () => {
+                            try {
+                              const compressed = await compressImage(reader.result as string, 800, 800, 0.7);
+                              setProfileData({ ...profileData, favPhoto: compressed });
+                              playSweetHeartbeat();
+                            } catch (err) {
+                              console.warn('Highlight photo compression failed:', err);
+                              setProfileData({ ...profileData, favPhoto: reader.result as string });
+                            }
                           };
                           reader.readAsDataURL(file);
                         }

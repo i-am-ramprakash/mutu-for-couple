@@ -128,10 +128,11 @@ interface HomeDashboardProps {
   onSectionSelect: (section: string) => void;
   onLogout: () => void;
   onRefreshUser: () => void;
+  onBroadcastProfileUpdate?: () => void;
 }
 
 export default function HomeDashboard({ 
-  user, stats, messages, memories, journalEntries, isSleepMode, onToggleSleepMode, onSectionSelect, onLogout, onRefreshUser 
+  user, stats, messages, memories, journalEntries, isSleepMode, onToggleSleepMode, onSectionSelect, onLogout, onRefreshUser, onBroadcastProfileUpdate 
 }: HomeDashboardProps) {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [newAnniversary, setNewAnniversary] = useState(user.anniversaryDate || '');
@@ -148,22 +149,36 @@ export default function HomeDashboard({
     }
   };
 
+  // Timezone-independent parsing for local-midnight date
+  const parseLocalMidnight = (dateStr: string) => {
+    if (!dateStr) return new Date();
+    const cleanStr = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+    const parts = cleanStr.split('-').map(Number);
+    if (parts.length < 3 || parts.some(isNaN)) {
+      return new Date(dateStr);
+    }
+    const [year, month, day] = parts;
+    return new Date(year, month - 1, day, 0, 0, 0, 0);
+  };
+
   // Calculate days together
   const calculateDaysTogether = () => {
     if (!user.anniversaryDate) return null;
-    const anniv = new Date(user.anniversaryDate);
-    const today = new Date();
+    const anniv = parseLocalMidnight(user.anniversaryDate);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
     const diffTime = today.getTime() - anniv.getTime();
     if (diffTime < 0) return 0; // future date
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
     return diffDays;
   };
 
   // Calculate days remaining to a calendar date
   const daysUntil = (targetDateStr: string) => {
     if (!targetDateStr) return null;
-    const today = new Date();
-    let target = new Date(targetDateStr);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    let target = parseLocalMidnight(targetDateStr);
     
     // Convert target to current year to calculate countdown
     target.setFullYear(today.getFullYear());
@@ -174,7 +189,7 @@ export default function HomeDashboard({
     }
     
     const diffTime = target.getTime() - today.getTime();
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return Math.round(diffTime / (1000 * 60 * 60 * 24));
   };
 
   const [counterTitleInput, setCounterTitleInput] = useState(user.customLoveCounterTitle || 'Days Together');
@@ -198,6 +213,9 @@ export default function HomeDashboard({
       if (res.ok) {
         setShowLocationEditor(false);
         onRefreshUser();
+        if (onBroadcastProfileUpdate) {
+          onBroadcastProfileUpdate();
+        }
       }
     } catch (err) {
       console.error(err);
@@ -216,6 +234,9 @@ export default function HomeDashboard({
       });
       if (res.ok) {
         onRefreshUser();
+        if (onBroadcastProfileUpdate) {
+          onBroadcastProfileUpdate();
+        }
       }
     } catch (err) {
       console.error(err);
@@ -234,6 +255,9 @@ export default function HomeDashboard({
       });
       if (res.ok) {
         onRefreshUser();
+        if (onBroadcastProfileUpdate) {
+          onBroadcastProfileUpdate();
+        }
       }
     } catch (err) {
       console.error(err);
@@ -288,6 +312,9 @@ export default function HomeDashboard({
       if (resAnniv.ok && resTitle.ok) {
         setShowDatePicker(false);
         onRefreshUser();
+        if (onBroadcastProfileUpdate) {
+          onBroadcastProfileUpdate();
+        }
       }
     } catch (err) {
       console.error(err);
@@ -303,7 +330,7 @@ export default function HomeDashboard({
 
   // Format YYYY-MM-DD back to reader format
   const formatDateFriendly = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('en-US', {
+    return parseLocalMidnight(dateStr).toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
       year: 'numeric'
@@ -357,6 +384,9 @@ export default function HomeDashboard({
       if (resCouple.ok && resUser.ok) {
         setShowSettingsModal(false);
         onRefreshUser();
+        if (onBroadcastProfileUpdate) {
+          onBroadcastProfileUpdate();
+        }
       }
     } catch (e) {
       console.error(e);
@@ -553,15 +583,18 @@ export default function HomeDashboard({
                       body: JSON.stringify({ userId: user.id, presenceStatus: e.target.value })
                     });
                     onRefreshUser();
+                    if (onBroadcastProfileUpdate) {
+                      onBroadcastProfileUpdate();
+                    }
                   } catch (err) {}
                 }}
                 className="text-[9px] font-bold text-stone-500 dark:text-stone-400 bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 px-2 py-0.5 rounded-lg mt-1 outline-none text-center cursor-pointer max-w-[95px] truncate"
               >
-                <option value="Thinking about you 🌙">Thinking about you 🌙</option>
-                <option value="Studying for exams 📚">Studying 📚</option>
-                <option value="Sleeping 😴">Sleeping 😴</option>
-                <option value="Busy cooking 🍳">Cooking 🍳</option>
-                <option value="Online 💖">Online 💖</option>
+                <option value="Thinking about you 🌙" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">Thinking about you 🌙</option>
+                <option value="Studying for exams 📚" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">Studying 📚</option>
+                <option value="Sleeping 😴" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">Sleeping 😴</option>
+                <option value="Busy cooking 🍳" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">Cooking 🍳</option>
+                <option value="Online 💖" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">Online 💖</option>
               </select>
             </div>
 
@@ -743,7 +776,7 @@ export default function HomeDashboard({
                   defaultValue="Custom Location"
                 >
                   {PRESET_CITIES.map((cityOpt) => (
-                    <option key={cityOpt.name} value={cityOpt.name}>
+                    <option key={cityOpt.name} value={cityOpt.name} className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">
                       {cityOpt.name === 'Custom Location' ? '✨ Set Custom Location' : `${cityOpt.name} (GMT${Number(cityOpt.timezone) >= 0 ? '+' : ''}${cityOpt.timezone})`}
                     </option>
                   ))}
@@ -769,7 +802,7 @@ export default function HomeDashboard({
                     className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 font-medium"
                   >
                     {ALL_TIMEZONES.map((tz, idx) => (
-                      <option key={`${tz.value}-${tz.label}-${idx}`} value={tz.value}>
+                      <option key={`${tz.value}-${tz.label}-${idx}`} value={tz.value} className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">
                         {tz.label} (GMT{Number(tz.value) >= 0 ? '+' : ''}{tz.value})
                       </option>
                     ))}
@@ -901,7 +934,7 @@ export default function HomeDashboard({
       <h3 className="text-lg font-serif font-bold text-stone-700 dark:text-stone-200 mb-4 flex items-center gap-1.5 px-1">
         🏰 Explore Shared Nest Rooms
       </h3>
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8" id="nest_navigation_grid">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8" id="nest_navigation_grid">
         
         {/* Messages */}
         <button

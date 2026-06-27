@@ -178,3 +178,20 @@ body.dark {
   background-size: 200% 100%;
 }
 
+/* Explicit PWA/mobile scroll containment & fluid scrolling */
+html, body {
+  overscroll-behavior-y: contain;
+  scroll-behavior: smooth;
+}
+
+/* Custom Select Dropdown Readability under light/dark modes */
+select option {
+  background-color: #ffffff !important;
+  color: #1c1917 !important;
+}
+
+.dark select option {
+  background-color: #1e293b !important;
+  color: #f8fafc !important;
+}
+
