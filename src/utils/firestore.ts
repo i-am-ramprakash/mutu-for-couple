@@ -28,13 +28,13 @@ function resolveFirebaseConfig() {
   const env = isBrowser ? (import.meta.env || {}) : process.env;
 
   return {
-    apiKey: env.VITE_FIREBASE_API_KEY || firebaseConfigDefault.apiKey,
-    authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfigDefault.authDomain,
-    projectId: env.VITE_FIREBASE_PROJECT_ID || firebaseConfigDefault.projectId,
-    storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfigDefault.storageBucket,
-    messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfigDefault.messagingSenderId,
-    appId: env.VITE_FIREBASE_APP_ID || firebaseConfigDefault.appId,
-    firestoreDatabaseId: env.VITE_FIREBASE_DATABASE_ID || firebaseConfigDefault.firestoreDatabaseId || '(default)'
+    apiKey: firebaseConfigDefault.apiKey || env.VITE_FIREBASE_API_KEY,
+    authDomain: firebaseConfigDefault.authDomain || env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: firebaseConfigDefault.projectId || env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: firebaseConfigDefault.storageBucket || env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: firebaseConfigDefault.messagingSenderId || env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: firebaseConfigDefault.appId || env.VITE_FIREBASE_APP_ID,
+    firestoreDatabaseId: firebaseConfigDefault.firestoreDatabaseId || env.VITE_FIREBASE_DATABASE_ID || '(default)'
   };
 }
 
