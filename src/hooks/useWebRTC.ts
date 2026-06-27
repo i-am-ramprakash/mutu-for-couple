@@ -14,7 +14,7 @@ export function useWebRTC(currentUser: User | null, sendMessage: (event: WSEvent
     if (!currentUser?.coupleId) return;
 
     const meteredSignalling = new SignallingClient({
-      apiKey: import.meta.env.VITE_METERED_REALTIME_API_KEY || 'sk_secret_ffeb92ae73cd8668dff2a2609b6a25b9183448a6562837edca95a86c8744f912'
+      apiKey: import.meta.env.VITE_METERED_REALTIME_API_KEY || ''
     });
     meteredSignallingRef.current = meteredSignalling;
 

@@ -19,7 +19,6 @@ import {
   playSweetLullaby, playBirdChirp 
 } from './utils/audio';
 import { AmbientSynth } from './utils/synth';
-import { useMuTuSocket } from './hooks/useMuTuSocket';
 import { useWebRTC } from './hooks/useWebRTC';
 
 import RelationshipAnalytics from './components/RelationshipAnalytics';
@@ -298,21 +297,15 @@ export default function App() {
   const [movieSyncState, setMovieSyncState] = useState<MovieState | null>(null);
   const [typingPartner, setTypingPartner] = useState(false);
 
-  const { sendMessage } = useMuTuSocket(currentUser, (payload) => {
-    // @ts-ignore
-    if (typeof handleIncomingWSEvent === 'function') {
-      // @ts-ignore
-      handleIncomingWSEvent(payload);
-    }
-  });
-
   const { 
     callActive, setCallActive, 
     incomingCall, setIncomingCall, 
     localStream, setLocalStream, 
     remoteStream, setRemoteStream, 
     startCall, endCall 
-  } = useWebRTC(currentUser, sendMessage);
+  } = useWebRTC(currentUser, (event) => {
+    sendRealTimeEvent(event);
+  });
 
   // Call duration counter timer effect
   useEffect(() => {
@@ -1268,7 +1261,7 @@ export default function App() {
         console.log('[Metered Realtime] Initializing SignallingClient for channel:', currentUser.coupleId);
         meteredSignalling = new SignallingClient({
           // Securely use the client-side API key from environment variables
-          apiKey: import.meta.env.VITE_METERED_REALTIME_API_KEY || 'sk_secret_ffeb92ae73cd8668dff2a2609b6a25b9183448a6562837edca95a86c8744f912'
+          apiKey: import.meta.env.VITE_METERED_REALTIME_API_KEY || ''
         });
         meteredSignallingRef.current = meteredSignalling;
 

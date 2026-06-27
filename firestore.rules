@@ -12,17 +12,22 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read, write: if true;
+      allow read: if respectsLimit(50);
+      allow create, update: if true;
+      allow delete: if false;
     }
 
     match /couples/{coupleId} {
-      allow read, write: if true;
+      allow read: if respectsLimit(10);
+      allow create, update: if true;
+      allow delete: if false;
     }
 
     match /messages/{messageId} {
       allow read: if respectsLimit(50);
       allow create: if true;
       allow update: if true;
+      allow delete: if false;
     }
 
     match /memories/{memoryId} {
@@ -76,7 +81,9 @@ service cloud.firestore {
     }
 
     match /movies/{movieId} {
-      allow read, write: if true;
+      allow read: if respectsLimit(100);
+      allow create, update: if true;
+      allow delete: if false;
     }
 
     match /moviesHistory/{historyId} {

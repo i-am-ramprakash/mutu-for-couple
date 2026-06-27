@@ -19,7 +19,7 @@ router.post('/ideas', async (req, res) => {
     Do NOT include any container ports, telemetry stats, mock console lines, or metadata. Be direct, sweet, and highly supportive!`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-2.0-flash',
       contents: systemPrompt
     });
 
@@ -56,7 +56,7 @@ router.post('/love-assistant', async (req, res) => {
     const fullPrompt = `${promptPrefix} ${promptText ? `Additional customization from user: "${promptText}".` : ''} Please present suggestions in a concise, beautifully formatted markdown list. Keep the tone completely human, supportive, and romantic yet down-to-earth. Do NOT use fake telemetry, technical meta, or flowery marketing speak.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-2.0-flash',
       contents: fullPrompt
     });
 
@@ -98,7 +98,7 @@ router.post('/relationship-health', async (req, res) => {
 
     const ai = getGeminiAI();
     const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-2.0-flash',
       contents: systemPrompt
     });
 

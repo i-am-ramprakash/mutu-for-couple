@@ -19,8 +19,8 @@ async function startServer() {
   const PORT = 3000;
 
   // Boost body size limits
-  app.use(express.json({ limit: '3000mb' }));
-  app.use(express.urlencoded({ limit: '3000mb', extended: true }));
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
   // Initialize Database in the background to avoid blocking server startup and prevent deployment timeouts
   loadDB().then(() => {

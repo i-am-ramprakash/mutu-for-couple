@@ -12,8 +12,6 @@ import {
   limit, 
   increment as firestoreIncrement 
 } from 'firebase/firestore';
-import fs from 'fs';
-import path from 'path';
 
 // Load config
 import { 
@@ -21,8 +19,38 @@ import {
   DailyAnswer, JournalEntry, BucketItem 
 } from '../types';
 
-const firebaseConfigPath = path.join(process.cwd(), 'firebase-applet-config.json');
-const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, 'utf-8'));
+// Resolve Firebase config from env vars (works in both browser and Node.js)
+// Falls back to reading the JSON file in Node.js if env vars are absent
+function resolveFirebaseConfig() {
+  const isBrowser = typeof window !== 'undefined';
+  const env = isBrowser ? (import.meta.env || {}) : process.env;
+
+  if (env && env.VITE_FIREBASE_API_KEY) {
+    return {
+      apiKey: env.VITE_FIREBASE_API_KEY,
+      authDomain: env.VITE_FIREBASE_AUTH_DOMAIN,
+      projectId: env.VITE_FIREBASE_PROJECT_ID,
+      storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET,
+      messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+      appId: env.VITE_FIREBASE_APP_ID,
+      firestoreDatabaseId: env.VITE_FIREBASE_DATABASE_ID || '(default)'
+    };
+  }
+
+  // Node.js server fallback — read from disk (safe: only runs in server context)
+  if (typeof window === 'undefined') {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const path = require('path');
+    const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+    return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+  }
+
+  return {};
+}
+
+const firebaseConfig = resolveFirebaseConfig();
 
 // Initialize Client SDK
 const app = getApps().length === 0 
@@ -168,6 +196,14 @@ export async function deleteRecord(collectionName: string, id: string): Promise<
 
 export async function migrateLocalDbToFirestore() {
   console.log('[Migration] Checking if Firestore database requires local sync...');
+  if (typeof window !== 'undefined') {
+    return;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const fs = require('fs');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const path = require('path');
+
   const DATA_DIR = path.join(process.cwd(), 'data');
   const DB_FILE = path.join(DATA_DIR, 'db.json');
   const INIT_MARKER = path.join(DATA_DIR, '.initialized');

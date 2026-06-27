@@ -6,7 +6,11 @@ const router = Router();
 
 router.get('/metered/turn', async (req, res) => {
   const domain = process.env.METERED_DOMAIN || 'mutu.metered.ca';
-  const apiKey = process.env.METERED_SECRET_KEY || 'sk_secret_ffeb92ae73cd8668dff2a2609b6a25b9183448a6562837edca95a86c8744f912';
+  const apiKey = process.env.METERED_SECRET_KEY;
+  if (!apiKey) {
+    console.warn('[TURN] METERED_SECRET_KEY not set. Returning empty TURN list.');
+    return res.json([]);
+  }
   try {
     const response = await fetch(`https://${domain}/api/v1/turn/credentials?apiKey=${apiKey}`);
     const data = await response.json();
