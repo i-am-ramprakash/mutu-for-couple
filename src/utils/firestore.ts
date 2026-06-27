@@ -11,7 +11,9 @@ import {
   orderBy, 
   limit, 
   increment as firestoreIncrement 
-} from 'firebase/firestore';
+ } from 'firebase/firestore';
+
+import firebaseConfigDefault from '../../firebase-applet-config.json';
 
 // Load config
 import { 
@@ -25,29 +27,15 @@ function resolveFirebaseConfig() {
   const isBrowser = typeof window !== 'undefined';
   const env = isBrowser ? (import.meta.env || {}) : process.env;
 
-  if (env && env.VITE_FIREBASE_API_KEY) {
-    return {
-      apiKey: env.VITE_FIREBASE_API_KEY,
-      authDomain: env.VITE_FIREBASE_AUTH_DOMAIN,
-      projectId: env.VITE_FIREBASE_PROJECT_ID,
-      storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET,
-      messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-      appId: env.VITE_FIREBASE_APP_ID,
-      firestoreDatabaseId: env.VITE_FIREBASE_DATABASE_ID || '(default)'
-    };
-  }
-
-  // Node.js server fallback — read from disk (safe: only runs in server context)
-  if (typeof window === 'undefined') {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const fs = require('fs');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const path = require('path');
-    const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
-    return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-  }
-
-  return {};
+  return {
+    apiKey: env.VITE_FIREBASE_API_KEY || firebaseConfigDefault.apiKey,
+    authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfigDefault.authDomain,
+    projectId: env.VITE_FIREBASE_PROJECT_ID || firebaseConfigDefault.projectId,
+    storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfigDefault.storageBucket,
+    messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfigDefault.messagingSenderId,
+    appId: env.VITE_FIREBASE_APP_ID || firebaseConfigDefault.appId,
+    firestoreDatabaseId: env.VITE_FIREBASE_DATABASE_ID || firebaseConfigDefault.firestoreDatabaseId || '(default)'
+  };
 }
 
 const firebaseConfig = resolveFirebaseConfig();
