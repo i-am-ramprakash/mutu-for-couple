@@ -30,7 +30,8 @@ async function startServer() {
   });
 
   // Setup WebSockets
-  setupWebSocket(server);
+  let viteInstance: any = null;
+  setupWebSocket(server, () => viteInstance);
 
   // API Routes
   app.use('/api/auth', authRouter);
@@ -41,14 +42,13 @@ async function startServer() {
 
   // Vite / Static Serving
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
+    viteInstance = await createViteServer({
       server: { 
-        middlewareMode: true,
-        hmr: { server }
+        middlewareMode: true
       },
       appType: 'spa',
     });
-    app.use(vite.middlewares);
+    app.use(viteInstance.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));

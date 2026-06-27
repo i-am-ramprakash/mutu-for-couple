@@ -7,11 +7,15 @@ import { addRecord, updateRecord } from '../src/utils/firestore';
 export const clientSockets = new Map<string, WebSocket>();
 export const activeChatUsers = new Set<string>();
 
-export function setupWebSocket(server: Server) {
+export function setupWebSocket(server: Server, getViteServer?: () => any) {
   const wss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (request, socket, head) => {
     if (request.headers['sec-websocket-protocol'] === 'vite-hmr') {
+      const vite = getViteServer?.();
+      if (vite) {
+        vite.ws.handleUpgrade(request, socket, head);
+      }
       return;
     }
     wss.handleUpgrade(request, socket, head, (ws) => {
