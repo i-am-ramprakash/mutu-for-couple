@@ -42,7 +42,7 @@ import SecretVault from './components/SecretVault';
 import UserProfile from './components/UserProfile';
 import CallDiagnostics from './components/CallDiagnostics';
 import { useTheme } from './ThemeContext';
-import { db } from './lib/firebase';
+import { db, auth, signOut } from './lib/firebase';
 import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, limit, orderBy } from 'firebase/firestore';
 
 const isImageString = (src: string | undefined | null): boolean => {
@@ -2305,7 +2305,12 @@ export default function App() {
     }
   }, [callActive]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (e) {
+      console.warn('Firebase signOut failed:', e);
+    }
     localStorage.removeItem('mutu_user_session');
     setCurrentUser(null);
     setActiveSection('dashboard');

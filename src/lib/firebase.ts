@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAnalytics } from 'firebase/analytics';
-import { getAuth, GoogleAuthProvider, OAuthProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, OAuthProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import { 
   initializeFirestore, 
   persistentLocalCache, 
@@ -31,4 +31,4 @@ export const signInWithApple = () => {
     return signInWithPopup(auth, provider);
 };
 
-export { signInWithEmailAndPassword, createUserWithEmailAndPassword };
+export { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut };

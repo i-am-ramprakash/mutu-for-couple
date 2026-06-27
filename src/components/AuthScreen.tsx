@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Heart, Loader2, Sparkles, User as UserIcon, Calendar, Mail, Lock, LogIn, UserPlus, Key, Eye, EyeOff, Copy } from 'lucide-react';
 import { User } from '../types';
-import { signInWithGoogle, signInWithApple, signInWithEmailAndPassword, createUserWithEmailAndPassword, auth } from '../lib/firebase';
+import { signInWithGoogle, signInWithApple, signInWithEmailAndPassword, createUserWithEmailAndPassword, auth, signOut } from '../lib/firebase';
 
 interface AuthScreenProps {
   onAuthSuccess: (user: User) => void;
@@ -599,8 +599,13 @@ export default function AuthScreen({ onAuthSuccess, currentUser, onRefreshUser }
                 Reset Connection
               </button>
               <button
-                onClick={() => {
+                onClick={async () => {
                    setShowTroubleshootingModal(false);
+                   try {
+                     await signOut(auth);
+                   } catch (e) {
+                     console.warn('Firebase signOut failed in Troubleshooting modal:', e);
+                   }
                    localStorage.removeItem('mutu_user_session');
                    window.location.reload();
                 }}
