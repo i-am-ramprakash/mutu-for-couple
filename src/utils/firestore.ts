@@ -1,67 +1,29 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { 
-  getFirestore, 
-  doc, 
-  getDoc, 
-  getDocs, 
-  setDoc, 
-  deleteDoc, 
-  collection, 
-  query, 
-  orderBy, 
-  limit, 
-  increment as firestoreIncrement 
- } from 'firebase/firestore';
+import { createClient } from '@supabase/supabase-js';
 
-import firebaseConfigDefault from '../../firebase-applet-config.json';
+// Supabase Credentials (reads from env vars, falls back to project defaults)
+const SUPABASE_URL = "https://uaxorqcetvntmgdqqlvu.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVheG9ycWNldHZudG1nZHFxbHZ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1NjY1MzIsImV4cCI6MjA5ODE0MjUzMn0.k4GzwTadWoSpM9Eql6J8rV4uu9xb9rsrJLnKbkr6ql4";
 
-// Load config
-import { 
-  User, Couple, Message, Memory, CalendarEvent, 
-  DailyAnswer, JournalEntry, BucketItem 
-} from '../types';
-
-// Resolve Firebase config from env vars (works in both browser and Node.js)
-// Falls back to reading the JSON file in Node.js if env vars are absent
-function resolveFirebaseConfig() {
-  const isBrowser = typeof window !== 'undefined';
-  const env = isBrowser ? (import.meta.env || {}) : process.env;
-
-  return {
-    apiKey: firebaseConfigDefault.apiKey || env.VITE_FIREBASE_API_KEY,
-    authDomain: firebaseConfigDefault.authDomain || env.VITE_FIREBASE_AUTH_DOMAIN,
-    projectId: firebaseConfigDefault.projectId || env.VITE_FIREBASE_PROJECT_ID,
-    storageBucket: firebaseConfigDefault.storageBucket || env.VITE_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: firebaseConfigDefault.messagingSenderId || env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-    appId: firebaseConfigDefault.appId || env.VITE_FIREBASE_APP_ID,
-    firestoreDatabaseId: firebaseConfigDefault.firestoreDatabaseId || env.VITE_FIREBASE_DATABASE_ID || '(default)'
-  };
-}
-
-const firebaseConfig = resolveFirebaseConfig();
-
-// Initialize Client SDK
-const app = getApps().length === 0 
-  ? initializeApp(firebaseConfig) 
-  : getApp();
-
-// If database ID is "(default)" or empty/null, omit it so getFirestore connects to the default database correctly.
-const dbId = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
-  ? firebaseConfig.firestoreDatabaseId
-  : undefined;
-
-export const db = getFirestore(app, dbId);
-
-async function testConnection() {
-  try {
-    const testDoc = doc(db, 'test', 'connection');
-    await getDoc(testDoc);
-    console.log('[Firestore Client] Successfully verified connection to Firestore database server.');
-  } catch (error) {
-    console.error('[Firestore Client] Connection verification completed:', error instanceof Error ? error.message : String(error));
+function resolveSupabaseConfig() {
+  // On Node.js (server CJS bundle), use process.env. On the browser (Vite), use hardcoded
+  // client-safe anon key — import.meta.env is intentionally avoided to suppress esbuild warnings.
+  if (typeof window === 'undefined') {
+    return {
+      url: process.env.VITE_SUPABASE_URL || SUPABASE_URL,
+      anonKey: process.env.VITE_SUPABASE_ANON_KEY || SUPABASE_ANON_KEY
+    };
   }
+  return { url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY };
 }
-testConnection();
+
+const config = resolveSupabaseConfig();
+
+export const supabase = createClient(config.url, config.anonKey, {
+  auth: { persistSession: false }
+});
+
+// Re-export supabase as db for backwards compat with any future usage
+export const db = supabase;
 
 export enum OperationType {
   CREATE = 'create',
@@ -76,37 +38,57 @@ export interface FirestoreErrorInfo {
   error: string;
   operationType: OperationType;
   path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-  };
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: 'server-client-sdk',
-      email: 'server-client-sdk@applet.local'
-    },
     operationType,
     path
   };
-  console.error('[Firestore Error]:', JSON.stringify(errInfo, null, 2));
+  console.error('[Supabase Error]:', JSON.stringify(errInfo, null, 2));
   throw new Error(JSON.stringify(errInfo));
 }
 
+// Tables that store a couple_id helper column for efficient couple-scoped lookups
+const TABLES_WITH_COUPLE_ID = new Set([
+  'messages', 'memories', 'calendarEvents', 'dailyAnswers', 'journalEntries',
+  'bucketItems', 'lockedLetters', 'homeDecorations', 'securityLogs',
+  'timelineEvents', 'sharedTracks', 'callLogs', 'moviesHistory'
+]);
+
+function buildInsertRow(collectionName: string, item: any) {
+  const { id, ...data } = item;
+  const row: any = { id, data };
+
+  if (TABLES_WITH_COUPLE_ID.has(collectionName)) {
+    if (item.coupleId) row.couple_id = item.coupleId;
+    if (item.timestamp) row.timestamp = item.timestamp;
+    else if (item.date) row.timestamp = new Date(item.date).getTime() || null;
+    if (item.date) row.date = item.date;
+  }
+
+  if (collectionName === 'moviesHistory' && item.watchedAt) {
+    row.watchedAt = item.watchedAt;
+  }
+
+  return row;
+}
+
 // -------------------------------------------------------------
-// Core Firestore CRUD Helpers using Firebase Client SDK
+// Core CRUD Helpers backed by Supabase
 // -------------------------------------------------------------
 
 export async function getRecord<T>(collectionName: string, id: string): Promise<T | null> {
   try {
-    const docRef = doc(db, collectionName, id);
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
-      return { id: snap.id, ...snap.data() } as unknown as T;
-    }
+    const { data, error } = await supabase
+      .from(collectionName)
+      .select('id, data')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (data) return { id: data.id, ...(data.data as object) } as unknown as T;
     return null;
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, `${collectionName}/${id}`);
@@ -115,43 +97,46 @@ export async function getRecord<T>(collectionName: string, id: string): Promise<
 
 export async function collectionExists(collectionName: string): Promise<boolean> {
   try {
-    const colRef = collection(db, collectionName);
-    const q = query(colRef, limit(1));
-    const snap = await getDocs(q);
-    return !snap.empty;
-  } catch (error) {
-    console.error(`[Firestore] Failed to check existence of ${collectionName}:`, error);
+    const { count, error } = await supabase
+      .from(collectionName)
+      .select('*', { count: 'exact', head: true });
+    if (error) throw error;
+    return (count || 0) > 0;
+  } catch {
     return false;
   }
 }
 
 export async function getCollection<T>(collectionName: string, limitConstraint?: number, orderField?: string): Promise<T[]> {
   try {
-    const colRef = collection(db, collectionName);
-    let q = query(colRef);
-    
+    let query = supabase.from(collectionName).select('id, data');
+    if (limitConstraint) query = query.limit(limitConstraint);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    let items = (data || []).map(row => ({ id: row.id, ...(row.data as object) })) as unknown as T[];
+
+    // Sort in-memory to keep consistent ordering across environments
     if (orderField) {
-      q = query(colRef, orderBy(orderField, 'desc'));
+      items.sort((a: any, b: any) => {
+        const va = a[orderField], vb = b[orderField];
+        if (typeof va === 'number' && typeof vb === 'number') return vb - va;
+        return String(vb || '').localeCompare(String(va || ''));
+      });
     }
-    
-    if (limitConstraint) {
-      q = query(q, limit(limitConstraint));
-    }
-    
-    const snap = await getDocs(q);
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }) as unknown as T);
+
+    return items;
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, collectionName);
   }
 }
 
-export const increment = (val: number) => firestoreIncrement(val);
-
 export async function addRecord<T extends { id: string }>(collectionName: string, item: T): Promise<T> {
   try {
-    const docRef = doc(db, collectionName, item.id);
-    const { id, ...data } = item;
-    await setDoc(docRef, data);
+    const row = buildInsertRow(collectionName, item);
+    const { error } = await supabase.from(collectionName).upsert(row, { onConflict: 'id' });
+    if (error) throw error;
     return item;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, `${collectionName}/${item.id}`);
@@ -160,9 +145,9 @@ export async function addRecord<T extends { id: string }>(collectionName: string
 
 export async function updateRecord<T extends { id: string }>(collectionName: string, item: T): Promise<T> {
   try {
-    const docRef = doc(db, collectionName, item.id);
-    const { id, ...data } = item;
-    await setDoc(docRef, data, { merge: true });
+    const row = buildInsertRow(collectionName, item);
+    const { error } = await supabase.from(collectionName).upsert(row, { onConflict: 'id' });
+    if (error) throw error;
     return item;
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `${collectionName}/${item.id}`);
@@ -171,160 +156,17 @@ export async function updateRecord<T extends { id: string }>(collectionName: str
 
 export async function deleteRecord(collectionName: string, id: string): Promise<void> {
   try {
-    const docRef = doc(db, collectionName, id);
-    await deleteDoc(docRef);
+    const { error } = await supabase.from(collectionName).delete().eq('id', id);
+    if (error) throw error;
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `${collectionName}/${id}`);
   }
 }
 
-// -------------------------------------------------------------
-// Seeding & Synchronization logic
-// -------------------------------------------------------------
+// No-op increment stub (Supabase uses JSONB merge, so numeric increments are handled manually)
+export const increment = (val: number) => val;
 
+// Migration stub — Supabase is the primary database, nothing to migrate
 export async function migrateLocalDbToFirestore() {
-  console.log('[Migration] Checking if Firestore database requires local sync...');
-  if (typeof window !== 'undefined') {
-    return;
-  }
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const fs = require('fs');
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const path = require('path');
-
-  const DATA_DIR = path.join(process.cwd(), 'data');
-  const DB_FILE = path.join(DATA_DIR, 'db.json');
-  const INIT_MARKER = path.join(DATA_DIR, '.initialized');
-
-  if (!fs.existsSync(DB_FILE)) {
-    console.log('[Migration] No local db.json file detected to sync.');
-    return;
-  }
-
-  try {
-    // 1. Check if the database has already been initialized via marker
-    if (fs.existsSync(INIT_MARKER)) {
-      console.log('[Migration] Initialization marker exists. Skipping full migration check.');
-      return;
-    }
-
-    const localData = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
-    
-    // 2. Efficiently check if Firestore has data (don't read the whole collection)
-    const hasData = await collectionExists('users');
-
-    if (hasData) {
-      console.log('[Migration] Remote Firestore database already has data. Skipping seeding.');
-      fs.writeFileSync(INIT_MARKER, 'true', 'utf-8');
-      return;
-    }
-
-    if (fs.existsSync(INIT_MARKER)) {
-      console.log('[Migration] Checked Firestore and found 0 users, and initialization marker exists. This implies a manual database reset/deletion in the Firebase console. Clearing local db.json to match Firestore.');
-      const clearedDb = {
-        users: [],
-        couples: [],
-        messages: [],
-        memories: [],
-        calendarEvents: [],
-        dailyAnswers: [],
-        journalEntries: [],
-        movies: [],
-        moviesHistory: [],
-        bucketList: [],
-        lockedLetters: [],
-        decorations: [],
-        securityLogs: [],
-        timelineEvents: [],
-        sharedTracks: [],
-        callLogs: []
-      };
-      fs.writeFileSync(DB_FILE, JSON.stringify(clearedDb, null, 2), 'utf-8');
-      return;
-    }
-
-    console.log('[Migration] Database is empty on Firestore. Seeding started...');
-
-    // Seed Users
-    if (Array.isArray(localData.users)) {
-      for (const u of localData.users) {
-        await addRecord('users', u);
-      }
-      console.log(`[Migration] Synced ${localData.users.length} users to Firestore.`);
-    }
-
-    // Seed Couples
-    if (Array.isArray(localData.couples)) {
-      for (const c of localData.couples) {
-        await addRecord('couples', c);
-      }
-      console.log(`[Migration] Synced ${localData.couples.length} couples to Firestore.`);
-    }
-
-    // Seed Messages
-    if (Array.isArray(localData.messages)) {
-      for (const m of localData.messages) {
-        await addRecord('messages', m);
-      }
-      console.log(`[Migration] Synced ${localData.messages.length} messages to Firestore.`);
-    }
-
-    // Seed Memories
-    if (Array.isArray(localData.memories)) {
-      for (const m of localData.memories) {
-        await addRecord('memories', m);
-      }
-      console.log(`[Migration] Synced ${localData.memories.length} memories to Firestore.`);
-    }
-
-    // Seed Calendar Events
-    if (Array.isArray(localData.calendarEvents)) {
-      for (const e of localData.calendarEvents) {
-        await addRecord('calendarEvents', e);
-      }
-      console.log(`[Migration] Synced ${localData.calendarEvents.length} calendarEvents to Firestore.`);
-    }
-
-    // Seed Daily Answers
-    if (Array.isArray(localData.dailyAnswers)) {
-      for (const a of localData.dailyAnswers) {
-        await addRecord('dailyAnswers', a);
-      }
-      console.log(`[Migration] Synced ${localData.dailyAnswers.length} dailyAnswers to Firestore.`);
-    }
-
-    // Seed Journal Entries
-    if (Array.isArray(localData.journalEntries)) {
-      for (const j of localData.journalEntries) {
-        await addRecord('journalEntries', j);
-      }
-      console.log(`[Migration] Synced ${localData.journalEntries.length} journalEntries to Firestore.`);
-    }
-
-    // Seed Bucket List
-    if (Array.isArray(localData.bucketList)) {
-      for (const b of localData.bucketList) {
-        await addRecord('bucketItems', b);
-      }
-      console.log(`[Migration] Synced ${localData.bucketList.length} bucket items to Firestore.`);
-    }
-
-    // Seed Movies & MoviesHistory
-    if (Array.isArray(localData.movies)) {
-      for (const m of localData.movies) {
-        await addRecord('movies', m);
-      }
-    }
-    if (Array.isArray(localData.moviesHistory)) {
-      for (const h of localData.moviesHistory) {
-        await addRecord('moviesHistory', h);
-      }
-    }
-
-    console.log('[Migration] Local DB to Firestore migration complete. ✨');
-    fs.writeFileSync(INIT_MARKER, 'true', 'utf-8');
-
-  } catch (error) {
-    console.error('[Migration] Failed to migrate/seed database:', error);
-  }
+  console.log('[Supabase] Primary database active. Migration step skipped.');
 }

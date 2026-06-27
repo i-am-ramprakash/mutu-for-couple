@@ -5,6 +5,29 @@ import { User } from '../../src/types';
 
 const router = Router();
 
+// Helper: merges live partner info into user object so both devices stay in sync
+export function populatePartnerFields(user: User): any {
+  if (!user) return user;
+  const partner = user.partnerId ? db.users.find(u => u.id === user.partnerId) : null;
+  if (partner) {
+    return {
+      ...user,
+      partnerName: partner.name || '',
+      partnerPhoto: partner.profilePhoto || '🧡',
+      partnerCity: partner.locationCity || '',
+      partnerWeather: partner.locationWeather || '',
+      partnerTimezone: partner.locationTimezone || '0',
+      partnerMood: partner.checkInMood || '',
+      partnerLoveLanguage: partner.checkInLoveLanguage || '',
+      partnerSleepMode: partner.isSleepMode || false,
+      partnerOnline: partner.online || false,
+      partnerLastActiveTime: partner.lastActiveTime || 0,
+      partnerPresenceStatus: partner.currentPresenceStatus || ''
+    };
+  }
+  return user;
+}
+
 router.post('/google', async (req, res) => {
   const { uid, name, email, profilePhoto } = req.body;
   try {
@@ -27,7 +50,7 @@ router.post('/google', async (req, res) => {
       db.users.push(newUser);
       user = newUser;
     }
-    res.json(user);
+    res.json(populatePartnerFields(user));
   } catch (err) {
     res.status(500).json({ error: 'Auth failed' });
   }
@@ -46,7 +69,7 @@ router.post('/register', async (req, res) => {
     };
     await addRecord('users', newUser);
     db.users.push(newUser);
-    res.json(newUser);
+    res.json(populatePartnerFields(newUser));
   } catch (err) {
     res.status(500).json({ error: 'Registration failed' });
   }
@@ -78,7 +101,7 @@ router.post('/login', async (req, res) => {
         return res.status(400).json({ error: 'User ID is required for login/registration fallback' });
       }
 
-      console.log(`[Login] User ${uid} not found in Firestore. Creating fallback user profile.`);
+      console.log(`[Login] User ${uid} not found in Supabase. Creating fallback user profile.`);
       const newUser: User = {
         id: uid,
         name: email ? email.split('@')[0] : 'User',
@@ -91,7 +114,7 @@ router.post('/login', async (req, res) => {
       db.users.push(newUser);
       user = newUser;
     }
-    res.json(user);
+    res.json(populatePartnerFields(user));
   } catch (err) {
     console.error('[Login Route Error]:', err);
     res.status(500).json({ error: `Login failed: ${err instanceof Error ? err.message : String(err)}` });

@@ -1,24 +1,14 @@
 import { initializeApp } from 'firebase/app';
 import { getAnalytics } from 'firebase/analytics';
 import { getAuth, GoogleAuthProvider, OAuthProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
-import { 
-  initializeFirestore, 
-  persistentLocalCache, 
-  persistentMultipleTabManager 
-} from 'firebase/firestore';
 
 import firebaseConfig from '../../firebase-applet-config.json';
 
+// Firebase is used ONLY for Authentication (Google/Apple/Email sign-in).
+// All database operations go through Supabase via the Express server API.
 const app = initializeApp(firebaseConfig);
 export const analytics = typeof window !== 'undefined' ? getAnalytics(app) : null;
 export const auth = getAuth(app);
-
-// Enable offline persistence for client-side surgical performance
-export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager()
-  })
-}, firebaseConfig.firestoreDatabaseId || '(default)');
 
 export const signInWithGoogle = () => {
     const provider = new GoogleAuthProvider();

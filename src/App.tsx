@@ -42,8 +42,7 @@ import SecretVault from './components/SecretVault';
 import UserProfile from './components/UserProfile';
 import CallDiagnostics from './components/CallDiagnostics';
 import { useTheme } from './ThemeContext';
-import { db, auth, signOut } from './lib/firebase';
-import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, limit, orderBy } from 'firebase/firestore';
+import { auth, signOut } from './lib/firebase';
 
 const isImageString = (src: string | undefined | null): boolean => {
   if (!src) return false;
@@ -478,8 +477,12 @@ export default function App() {
               vapidKey: 'BDbIs-O_jA8bZ0Yx3yPzFf98-nKsn_bS86h_mutu-public-key'
             });
             if (token) {
-              const { doc, setDoc } = await import('firebase/firestore');
-              await setDoc(doc(db, 'users', currentUser.id), { fcmToken: token }, { merge: true });
+              // Persist FCM token through the server API instead of direct DB write
+              await fetch('/api/user/fcm-token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId: currentUser.id, fcmToken: token })
+              });
               console.log('[FCM] Token registered on permission change.');
             }
           } catch (me) {
@@ -1108,27 +1111,27 @@ export default function App() {
 
       case 'state:update': {
         if (payload.section === 'memories') {
-          // fetchMemories(); // Optimized: Handled by Firestore onSnapshot
+          fetchMemories(); // Refresh from server (Supabase via REST API)
           playSweetMessageSound();
           showPushNotification("📸 Shared Polaroid", `${user.partnerName || 'Companion'} posted a new Polaroid to your Memory Wall! 🖼️`, 'memories', 'memories');
         }
         if (payload.section === 'calendar') {
-          // fetchCalendar(); // Optimized: Handled by Firestore onSnapshot
+          fetchCalendar(); // Refresh from server (Supabase via REST API)
           playSweetMessageSound();
           showPushNotification("📅 Love hearth scheduled", `${user.partnerName || 'Companion'} scheduled a new event on your Shared Calendar.`, 'calendar', 'calendar');
         }
         if (payload.section === 'journal') {
-          // fetchJournal(); // Optimized: Handled by Firestore onSnapshot
+          fetchJournal(); // Refresh from server (Supabase via REST API)
           playSweetMessageSound();
           showPushNotification("📓 secret Diary page", `${user.partnerName || 'Companion'} wrote a new private journal page!`, 'journal', 'journal');
         }
         if (payload.section === 'daily') {
-          // fetchAnswersOnly(); // Optimized: Handled by Firestore onSnapshot
+          fetchAnswersOnly(); // Refresh from server (Supabase via REST API)
           playSweetSparkSound();
           showPushNotification("❓ Q&A Playroom", `${user.partnerName || 'Companion'} answered today's Question! Unlock to read. 🥰`, 'daily', 'daily');
         }
         if (payload.section === 'bucket') {
-          // fetchBucketList(); // Optimized: Handled by Firestore onSnapshot
+          fetchBucketList(); // Refresh from server (Supabase via REST API)
           playSweetSparkSound();
           showPushNotification("🗺️ Bucket List Update", `${user.partnerName || 'Companion'} updated your Shared Adventure checklist!`, 'bucket', 'bucket');
         }
@@ -1322,179 +1325,8 @@ export default function App() {
     };
   }, [currentUser?.id, fetchAllData, handleIncomingWSEvent]);
 
-  // 3. Firestore Real-time Listeners (Phase 1)
-  useEffect(() => {
-    if (!currentUser || !currentUser.coupleId) return;
-
-    console.log('[Firestore] Establishing real-time listeners for couple:', currentUser.coupleId);
-
-    const unsubscribes: (() => void)[] = [];
-
-    const handleListenerError = (err: any, col: string) => {
-      console.warn(`[Firestore Realtime error on ${col}]:`, err);
-    };
-
-    try {
-      // Messages listener (Surgical: Last 40 messages)
-      const qMsgs = query(
-        collection(db, 'messages'), 
-        where('coupleId', '==', currentUser.coupleId),
-        orderBy('timestamp', 'asc'),
-        limit(40)
-      );
-      const unsubMsgs = onSnapshot(qMsgs, (snapshot) => {
-        const msgs: Message[] = [];
-        snapshot.forEach(docSnap => {
-          msgs.push({ id: docSnap.id, ...docSnap.data() } as Message);
-        });
-        setMessages(msgs);
-      }, (err) => handleListenerError(err, 'messages'));
-      unsubscribes.push(unsubMsgs);
-
-      // Memories listener (Surgical: Last 30 memories)
-      const qMem = query(
-        collection(db, 'memories'), 
-        where('coupleId', '==', currentUser.coupleId),
-        orderBy('date', 'desc'),
-        limit(30)
-      );
-      const unsubMem = onSnapshot(qMem, (snapshot) => {
-        const items: Memory[] = [];
-        snapshot.forEach(docSnap => {
-          items.push({ id: docSnap.id, ...docSnap.data() } as Memory);
-        });
-        items.sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-        setMemories(items);
-      }, (err) => handleListenerError(err, 'memories'));
-      unsubscribes.push(unsubMem);
-
-      // CalendarEvents listener (No limit usually needed as events are sparse, but helpful for cost protection)
-      const qCal = query(
-        collection(db, 'calendarEvents'), 
-        where('coupleId', '==', currentUser.coupleId),
-        limit(100)
-      );
-      const unsubCal = onSnapshot(qCal, (snapshot) => {
-        const items: CalendarEvent[] = [];
-        snapshot.forEach(docSnap => {
-          items.push({ id: docSnap.id, ...docSnap.data() } as CalendarEvent);
-        });
-        setCalendarEvents(items);
-      }, (err) => handleListenerError(err, 'calendarEvents'));
-      unsubscribes.push(unsubCal);
-
-      // JournalEntries listener (Surgical: Last 20 entries)
-      const qJrn = query(
-        collection(db, 'journalEntries'), 
-        where('coupleId', '==', currentUser.coupleId),
-        orderBy('date', 'desc'),
-        limit(20)
-      );
-      const unsubJrn = onSnapshot(qJrn, (snapshot) => {
-        const items: JournalEntry[] = [];
-        snapshot.forEach(docSnap => {
-          items.push({ id: docSnap.id, ...docSnap.data() } as JournalEntry);
-        });
-        setJournalEntries(items);
-      }, (err) => handleListenerError(err, 'journalEntries'));
-      unsubscribes.push(unsubJrn);
-
-      // BucketItems listener
-      const qBkt = query(
-        collection(db, 'bucketItems'), 
-        where('coupleId', '==', currentUser.coupleId),
-        limit(50)
-      );
-      const unsubBkt = onSnapshot(qBkt, (snapshot) => {
-        const items: BucketItem[] = [];
-        snapshot.forEach(docSnap => {
-          items.push({ id: docSnap.id, ...docSnap.data() } as BucketItem);
-        });
-        setBucketItems(items);
-      }, (err) => handleListenerError(err, 'bucketItems'));
-      unsubscribes.push(unsubBkt);
-
-      // DailyAnswers listener (Surgical: Last 50 answers)
-      const qAns = query(
-        collection(db, 'dailyAnswers'), 
-        where('coupleId', '==', currentUser.coupleId),
-        orderBy('timestamp', 'desc'),
-        limit(50)
-      );
-      const unsubAns = onSnapshot(qAns, (snapshot) => {
-        const items: DailyAnswer[] = [];
-        snapshot.forEach(docSnap => {
-          items.push({ id: docSnap.id, ...docSnap.data() } as DailyAnswer);
-        });
-        setDailyAnswers(items);
-      }, (err) => handleListenerError(err, 'dailyAnswers'));
-      unsubscribes.push(unsubAns);
-
-      // Partner user profile listener
-      if (currentUser.partnerId) {
-        const unsubPartner = onSnapshot(doc(db, 'users', currentUser.partnerId), (snapshot) => {
-          if (snapshot.exists()) {
-            const partnerData = snapshot.data();
-            setCurrentUser(prev => {
-              if (!prev) return null;
-              return {
-                ...prev,
-                partnerName: partnerData.name || prev.partnerName,
-                partnerAvatarUrl: partnerData.avatarUrl || prev.avatarUrl,
-                partnerSleepMode: partnerData.isSleepMode || false,
-                partnerOnline: partnerData.online || false,
-                partnerLastActiveTime: partnerData.lastActiveTime || 0,
-                // dedicated rich profile fields
-                coverPhoto: partnerData.coverPhoto || prev.coverPhoto,
-                coverRepositionY: partnerData.coverRepositionY || prev.coverRepositionY,
-                nickname: partnerData.nickname || prev.nickname,
-                personalNote: partnerData.personalNote || prev.personalNote,
-                favFood: partnerData.favFood || prev.favFood,
-                favMovie: partnerData.favMovie || prev.favMovie,
-                favSong: partnerData.favSong || prev.favSong,
-                favColor: partnerData.favColor || prev.favColor,
-                dreamDestination: partnerData.dreamDestination || prev.dreamDestination,
-                reunionDate: partnerData.reunionDate || prev.reunionDate,
-                distance: partnerData.distance || prev.distance,
-                wakeTime: partnerData.wakeTime || prev.wakeTime,
-                sleepTime: partnerData.sleepTime || prev.sleepTime,
-                workSchedule: partnerData.workSchedule || prev.workSchedule,
-                bestTimeToCall: partnerData.bestTimeToCall || prev.bestTimeToCall,
-                partnerCity: partnerData.locationCity || prev.partnerCity,
-                partnerWeather: partnerData.locationWeather || prev.partnerWeather,
-                partnerTimezone: partnerData.locationTimezone || prev.partnerTimezone,
-              };
-            });
-          }
-        }, (err) => handleListenerError(err, 'partnerUser'));
-        unsubscribes.push(unsubPartner);
-      }
-
-      // Self profile user listener
-      const unsubSelf = onSnapshot(doc(db, 'users', currentUser.id), (snapshot) => {
-        if (snapshot.exists()) {
-          const selfData = snapshot.data();
-          setCurrentUser(prev => {
-            if (!prev) return null;
-            return {
-              ...prev,
-              ...selfData,
-              id: snapshot.id
-            } as User;
-          });
-        }
-      }, (err) => handleListenerError(err, 'selfUser'));
-      unsubscribes.push(unsubSelf);
-
-    } catch (e) {
-      console.error('[Firestore] Failed setting up listeners:', e);
-    }
-
-    return () => {
-      console.log('[Firestore] unsubscribing listeners for couple:', currentUser.coupleId);
-      unsubscribes.forEach(unsub => unsub());
-    };
-  }, [currentUser?.id, currentUser?.coupleId, currentUser?.partnerId]);
+  // 3. Real-time sync is handled entirely through WebSocket + REST fetchers.
+  // Firestore listeners removed — Supabase is accessed server-side only via the Express API.
 
   // Mark in-app chat messages as read/seen in Firestore & notify partner
   useEffect(() => {
@@ -1509,14 +1341,7 @@ export default function App() {
           return m;
         }));
 
-        // Update in Firestore
-        unreadMsgs.forEach(async (m) => {
-          try {
-            await updateDoc(doc(db, 'messages', m.id), { read: true, status: 'seen' });
-          } catch (err) {
-            console.warn('[Firestore] Failed to mark message as read:', err);
-          }
-        });
+        // Seen status is persisted server-side via the WebSocket chat:seen-update handler in socket.ts
 
         // Notify partner via WebSockets
         try {
@@ -1550,21 +1375,8 @@ export default function App() {
       return;
     }
 
-    // Direct Firestore backup to guarantee absolute delivery ONLY when offline/WS is down
-    try {
-      const docRef = doc(db, 'messages', msg.id);
-      const messageToSave = {
-        ...msg,
-        status: 'sent'
-      };
-      await setDoc(docRef, messageToSave);
-      
-      // Immediately set local state status to 'sent'
-      setMessages((prev) => prev.map(m => m.id === msg.id ? { ...m, status: 'sent' } : m));
-    } catch (fsErr) {
-      console.error('[WebRTC/FS] Combined fallback direct save to Firestore also failed:', fsErr);
-      setMessages((prev) => prev.map(m => m.id === msg.id ? { ...m, status: 'failed' } : m));
-    }
+    // WS delivery failed — mark as failed so user can retry. Server persists to Supabase on delivery.
+    setMessages((prev) => prev.map(m => m.id === msg.id ? { ...m, status: 'failed' } : m));
   };
 
   const handleSendMessage = (privatePayload: { textEncrypted: string; iv: string; isVoice?: boolean; isMovie?: boolean; replyToId?: string; replyToText?: string }) => {

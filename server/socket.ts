@@ -47,7 +47,7 @@ export function setupWebSocket(server: Server, getViteServer?: () => any) {
             await addRecord('messages', payload.message);
             db.messages.push(payload.message);
           } catch (err) {
-            console.error('[WS Server] Failed to persist message to Firestore:', err);
+            console.error('[WS Server] Failed to persist message to Supabase:', err);
           }
         }
 
@@ -60,7 +60,45 @@ export function setupWebSocket(server: Server, getViteServer?: () => any) {
               await updateRecord('messages', msg);
             }
           } catch (err) {
-            console.error('[WS Server] Failed to update message delivery in Firestore:', err);
+            console.error('[WS Server] Failed to update message delivery in Supabase:', err);
+          }
+        }
+
+        // Persist seen status update on server side (removes need for client direct DB write)
+        if (payload.type === 'chat:seen-update') {
+          try {
+            const partnerId = getPartnerId(currentUserId || '');
+            if (partnerId) {
+              const unread = db.messages.filter(m => m.senderId === partnerId && m.status !== 'seen');
+              for (const msg of unread) {
+                msg.read = true;
+                msg.status = 'seen';
+                await updateRecord('messages', msg);
+              }
+            }
+          } catch (err) {
+            console.error('[WS Server] Failed to persist seen status in Supabase:', err);
+          }
+        }
+
+        // Persist chat reaction on server side (removes need for client direct DB write)
+        if (payload.type === 'chat:reaction') {
+          try {
+            const { messageId, reaction, action } = payload as any;
+            const msg = db.messages.find(m => m.id === messageId);
+            if (msg) {
+              let reactions = [...(msg.reactions || [])];
+              if (action === 'add') {
+                reactions = reactions.filter(r => r.userId !== reaction.userId);
+                reactions.push(reaction);
+              } else {
+                reactions = reactions.filter(r => r.userId !== reaction.userId);
+              }
+              msg.reactions = reactions;
+              await updateRecord('messages', msg);
+            }
+          } catch (err) {
+            console.error('[WS Server] Failed to persist reaction in Supabase:', err);
           }
         }
 
@@ -82,7 +120,7 @@ export function setupWebSocket(server: Server, getViteServer?: () => any) {
               console.log('[WS Server] Call log persisted:', callLog);
             }
           } catch (err) {
-            console.error('[WS Server] Failed to persist call log:', err);
+            console.error('[WS Server] Failed to persist call log in Supabase:', err);
           }
         }
 

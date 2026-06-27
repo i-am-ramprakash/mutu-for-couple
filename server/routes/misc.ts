@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db, saveDB } from '../db';
 import { updateRecord, deleteRecord, addRecord } from '../../src/utils/firestore';
+import { populatePartnerFields } from './auth';
 
 const router = Router();
 
@@ -50,7 +51,7 @@ router.post('/user/delete-account', async (req, res) => {
 router.get('/user/profile/:userId', (req, res) => {
   const { userId } = req.params;
   const user = db.users.find(u => u.id === userId);
-  if (user) res.json({ success: true, user });
+  if (user) res.json({ success: true, user: populatePartnerFields(user) });
   else res.status(404).json({ error: 'User not found' });
 });
 
@@ -95,6 +96,18 @@ router.post('/user/presence', async (req, res) => {
     user.lastSeen = lastSeen;
     await updateRecord('users', user);
     res.json(user);
+  } else {
+    res.status(404).json({ error: 'User not found' });
+  }
+});
+
+router.post('/user/fcm-token', async (req, res) => {
+  const { userId, fcmToken } = req.body;
+  const user = db.users.find(u => u.id === userId);
+  if (user) {
+    (user as any).fcmToken = fcmToken;
+    await updateRecord('users', user);
+    res.json({ success: true });
   } else {
     res.status(404).json({ error: 'User not found' });
   }
