@@ -58,6 +58,33 @@ export default function App() {
     return cached ? JSON.parse(cached) : null;
   });
 
+  // Sync Supabase Auth state with local Express server state
+  useEffect(() => {
+    import('./utils/firestore').then(({ supabase }) => {
+      supabase.auth.onAuthStateChange(async (event, session) => {
+        if (session?.user && !currentUser) {
+          try {
+            const res = await fetch('/api/auth/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ uid: session.user.id, email: session.user.email })
+            });
+            if (res.ok) {
+              const freshUser = await res.json();
+              setCurrentUser(freshUser);
+              localStorage.setItem('mutu_user_session', JSON.stringify(freshUser));
+            }
+          } catch (err) {
+            console.error('[Auth Sync] Failed to sync session with server:', err);
+          }
+        } else if (!session && currentUser) {
+          setCurrentUser(null);
+          localStorage.removeItem('mutu_user_session');
+        }
+      });
+    });
+  }, [currentUser]);
+
   const handleToggleGlobalTheme = async () => {
     const isCurrentlyDark = 
       theme === 'dark' || 
@@ -473,27 +500,8 @@ export default function App() {
           }).catch(() => {});
         }
         
-        // Dynamic FCM Setup (Phase 2)
-        if (currentUser) {
-          try {
-            const { getMessaging, getToken } = await import('firebase/messaging');
-            const messaging = getMessaging();
-            const token = await getToken(messaging, {
-              vapidKey: 'BDbIs-O_jA8bZ0Yx3yPzFf98-nKsn_bS86h_mutu-public-key'
-            });
-            if (token) {
-              // Persist FCM token through the server API instead of direct DB write
-              await fetch('/api/user/fcm-token', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId: currentUser.id, fcmToken: token })
-              });
-              console.log('[FCM] Token registered on permission change.');
-            }
-          } catch (me) {
-            console.log('[FCM] Registration deferred on this environment context:', me);
-          }
-        }
+        // Dynamic FCM Setup (Phase 2) - Bypassed for clean Supabase migration
+        console.log('[FCM] Skipping FCM registration since Firebase is removed.');
       }
     } catch (err) {
       console.warn('Failed requesting notification permission:', err);
