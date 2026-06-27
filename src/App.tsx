@@ -1436,27 +1436,13 @@ export default function App() {
       return m;
     }));
 
-    // Broadcast over real-time stream
+    // Broadcast over real-time stream. The server socket handler now persists this automatically.
     sendRealTimeEvent({
       type: 'chat:reaction',
       messageId,
       reaction,
       action
     });
-
-    // Direct Firestore update to persist reaction
-    try {
-      const docRef = doc(db, 'messages', messageId);
-      await updateDoc(docRef, { reactions: newReactionsList });
-    } catch (err) {
-      console.warn('[WebRTC/FS] Failed to run updateDoc on reaction, trying setDoc merge instead:', err);
-      try {
-        const docRef = doc(db, 'messages', messageId);
-        await setDoc(docRef, { reactions: newReactionsList }, { merge: true });
-      } catch (e) {
-        console.error('[WebRTC/FS] Direct reactions sync failed:', e);
-      }
-    }
   };
 
   const handleSendTyping = (isTyping: boolean) => {
